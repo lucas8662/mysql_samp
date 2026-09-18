@@ -48,7 +48,7 @@ jobs:
       - name: Install build dependencies
         shell: pwsh
         run: |
-          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install boost-atomic boost-chrono boost-date-time boost-system boost-thread openssl --triplet x86-windows-static-md
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install boost-headers boost-atomic boost-chrono boost-date-time boost-system boost-thread openssl --triplet x86-windows-static-md
       - name: Build
         shell: pwsh
         run: |

@@ -35,7 +35,7 @@ add_subdirectory(third_party/mariadb-connector-c)
 
 # vcpkg exports BoostConfig.cmake.  Config mode avoids CMake 4's removed
 # FindBoost compatibility module and works with the Windows static-md triplet.
-find_package(Boost CONFIG REQUIRED COMPONENTS atomic chrono date_time system thread)
+find_package(Boost CONFIG REQUIRED COMPONENTS headers atomic chrono date_time system thread)
 
 file(GLOB PLUGIN_SOURCES CONFIGURE_DEPENDS src/*.cpp libs/sdk/*.cpp libs/sdk/amx/*.c)
 add_library(mysql_plugin SHARED ${PLUGIN_SOURCES})
@@ -49,10 +49,12 @@ target_include_directories(mysql_plugin PRIVATE
 target_compile_definitions(mysql_plugin PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(mysql_plugin PRIVATE
     mariadbclient
-    Boost::atomic Boost::chrono Boost::date_time Boost::system Boost::thread)
+    Boost::headers Boost::atomic Boost::chrono Boost::date_time Boost::system Boost::thread)
 
 if(WIN32)
-    target_compile_definitions(mysql_plugin PRIVATE WIN32 _WINDOWS _USRDLL)
+    # The legacy AMX SDK predates MSVC's standard <stdint.h> and otherwise
+    # redeclares int32_t/uint32_t with incompatible Windows types.
+    target_compile_definitions(mysql_plugin PRIVATE WIN32 _WINDOWS _USRDLL HAVE_STDINT_H)
     target_link_libraries(mysql_plugin PRIVATE ws2_32)
     target_link_options(mysql_plugin PRIVATE "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/plugin.def")
 else()
