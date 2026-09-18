@@ -25,7 +25,7 @@ set(CLIENT_PLUGIN_CLIENT_ED25519 OFF CACHE STRING "" FORCE)
 set(CLIENT_PLUGIN_PARSEC OFF CACHE STRING "" FORCE)
 set(CLIENT_PLUGIN_AUTH_GSSAPI_CLIENT OFF CACHE STRING "" FORCE)
 set(CLIENT_PLUGIN_MYSQL_CLEAR_PASSWORD OFF CACHE STRING "" FORCE)
-set(CLIENT_PLUGIN_PVIO_SHMEM OFF CACHE STRING "" FORCE)
+set(CLIENT_PLUGIN_PVIO_SHMEM STATIC CACHE STRING "" FORCE)
 # MariaDB Connector/C omits this default when built as a subproject.  Its
 # dynamic authentication plugins still declare install rules, and CMake
 # requires a destination even though this project only ships mysql.dll.
