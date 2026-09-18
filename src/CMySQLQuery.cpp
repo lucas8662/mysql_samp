@@ -10,7 +10,7 @@
 namespace chrono = boost::chrono;
 
 
-static void SetPreparedQueryError(CMySQLQuery *query, const char *log_funcname, unsigned int error_id, const char *error_str)
+static void SetPreparedQueryError(CMySQLQuery *query, char *log_funcname, unsigned int error_id, const char *error_str)
 {
 	CLog::Get()->LogFunction(LOG_ERROR, log_funcname, "(error #%d) %s (Prepared query: \"%s\")", error_id, error_str, query->Query.c_str());
 

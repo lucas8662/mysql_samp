@@ -1179,7 +1179,7 @@ AMX_DECLARE_NATIVE(Native::mysql_stmt_prepare)
 	return static_cast<cell>(statementID);
 }
 
-static CPreparedStatementTemplate *GetPreparedStatement(unsigned int statementID, const char *function)
+static CPreparedStatementTemplate *GetPreparedStatement(unsigned int statementID, char *function)
 {
 	std::map<unsigned int, CPreparedStatementTemplate>::iterator it = PreparedStatements.find(statementID);
 	if (it == PreparedStatements.end())
@@ -1190,7 +1190,7 @@ static CPreparedStatementTemplate *GetPreparedStatement(unsigned int statementID
 	return &it->second;
 }
 
-static bool GetPreparedParameter(CPreparedStatementTemplate *statement, unsigned int parameterID, CMySQLQuery::s_StatementParameter *&parameter, const char *function)
+static bool GetPreparedParameter(CPreparedStatementTemplate *statement, unsigned int parameterID, CMySQLQuery::s_StatementParameter *&parameter, char *function)
 {
 	if (parameterID > 1023)
 	{
