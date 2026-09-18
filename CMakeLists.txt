@@ -36,6 +36,8 @@ add_subdirectory(third_party/mariadb-connector-c)
 # vcpkg exports BoostConfig.cmake.  Config mode avoids CMake 4's removed
 # FindBoost compatibility module and works with the Windows static-md triplet.
 find_package(Boost CONFIG REQUIRED COMPONENTS headers atomic chrono date_time system thread)
+# vcpkg Boost component targets may not export their header directory.
+find_path(SAMP_BOOST_INCLUDE_DIR boost/variant.hpp REQUIRED)
 
 file(GLOB PLUGIN_SOURCES CONFIGURE_DEPENDS src/*.cpp libs/sdk/*.cpp libs/sdk/amx/*.c)
 add_library(mysql_plugin SHARED ${PLUGIN_SOURCES})
@@ -44,6 +46,7 @@ set_target_properties(mysql_plugin PROPERTIES OUTPUT_NAME mysql PREFIX "")
 target_include_directories(mysql_plugin PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/libs
     ${CMAKE_CURRENT_SOURCE_DIR}/libs/sdk/amx
+    ${SAMP_BOOST_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mariadb-connector-c/include
     ${CMAKE_CURRENT_BINARY_DIR}/third_party/mariadb-connector-c/include)
 target_compile_definitions(mysql_plugin PRIVATE _CRT_SECURE_NO_WARNINGS)
