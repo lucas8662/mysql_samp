@@ -82,6 +82,14 @@ bool CMySQLConnection::Connect()
 			if (m_Connection == NULL)
 				CLog::Get()->LogFunction(LOG_ERROR, "CMySQLConnection::Connect", "MySQL initialization failed");
 		}
+		if (m_Connection == NULL)
+			return false;
+
+		// Connector/C can retain SSL options from its defaults.  R39's normal
+		// mysql_connect must remain a plain connection; TLS is only mandatory
+		// when the caller opted in through mysql_connect_ssl or mysql.ini.
+		my_bool requireTls = m_TLS.Enabled ? 1 : 0;
+		mysql_options(m_Connection, MYSQL_OPT_SSL_ENFORCE, &requireTls);
 
 		if (!m_IsConnected && m_TLS.Enabled)
 		{

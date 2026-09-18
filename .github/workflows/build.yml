@@ -55,7 +55,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           cmake -S . -B build/windows -A Win32 -DCMAKE_BUILD_TYPE=Release -Wno-dev -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x86-windows-static-md 2>&1 | Tee-Object -FilePath build/windows/configure.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake --build build/windows --config Release --parallel 2>&1 | Tee-Object -FilePath build/windows/build.log
+          cmake --build build/windows --config Release --target mysql_plugin --parallel 2>&1 | Tee-Object -FilePath build/windows/build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Upload CMake diagnostics
         if: failure()

@@ -17,6 +17,15 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(WITH_SSL OPENSSL CACHE STRING "" FORCE)
 set(CLIENT_PLUGIN_CACHING_SHA2_PASSWORD STATIC CACHE STRING "" FORCE)
 set(CLIENT_PLUGIN_SHA256_PASSWORD STATIC CACHE STRING "" FORCE)
+# The plugin embeds the authentication methods needed for MySQL 8. Do not
+# build Connector/C's optional dynamic modules; on Windows, client_ed25519
+# links extra CryptoAPI and Winsock dependencies that mysql.dll never uses.
+set(CLIENT_PLUGIN_DIALOG OFF CACHE STRING "" FORCE)
+set(CLIENT_PLUGIN_CLIENT_ED25519 OFF CACHE STRING "" FORCE)
+set(CLIENT_PLUGIN_PARSEC OFF CACHE STRING "" FORCE)
+set(CLIENT_PLUGIN_AUTH_GSSAPI_CLIENT OFF CACHE STRING "" FORCE)
+set(CLIENT_PLUGIN_MYSQL_CLEAR_PASSWORD OFF CACHE STRING "" FORCE)
+set(CLIENT_PLUGIN_PVIO_SHMEM OFF CACHE STRING "" FORCE)
 # MariaDB Connector/C omits this default when built as a subproject.  Its
 # dynamic authentication plugins still declare install rules, and CMake
 # requires a destination even though this project only ships mysql.dll.
