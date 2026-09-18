@@ -89,7 +89,9 @@ bool CMySQLConnection::Connect()
 		// mysql_connect must remain a plain connection; TLS is only mandatory
 		// when the caller opted in through mysql_connect_ssl or mysql.ini.
 		my_bool requireTls = m_TLS.Enabled ? 1 : 0;
+		my_bool verifyTlsCertificate = m_TLS.Enabled ? 1 : 0;
 		mysql_options(m_Connection, MYSQL_OPT_SSL_ENFORCE, &requireTls);
+		mysql_options(m_Connection, MYSQL_OPT_SSL_VERIFY_SERVER_CERT, &verifyTlsCertificate);
 
 		if (!m_IsConnected && m_TLS.Enabled)
 		{
