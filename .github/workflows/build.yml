@@ -26,6 +26,10 @@ jobs:
               libboost-date-time-dev:i386 libboost-system-dev:i386 libboost-atomic-dev:i386 \
               libssl-dev:i386 zlib1g-dev:i386
             make all
+            if readelf -d bin/mysql_static.so | grep -Eq "libssl\\.so|libcrypto\\.so"; then
+              echo "mysql_static.so must not depend on a system OpenSSL library"
+              exit 1
+            fi
           '
       - uses: actions/upload-artifact@v4
         with:
@@ -48,14 +52,19 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          cmake -S . -B build/windows -A Win32 -DCMAKE_BUILD_TYPE=Release -Wno-dev -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x86-windows-static-md
-          cmake --build build/windows --config Release --parallel
+          $ErrorActionPreference = 'Stop'
+          cmake -S . -B build/windows -A Win32 -DCMAKE_BUILD_TYPE=Release -Wno-dev -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x86-windows-static-md 2>&1 | Tee-Object -FilePath build/windows/configure.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build build/windows --config Release --parallel 2>&1 | Tee-Object -FilePath build/windows/build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Upload CMake diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: windows-cmake-diagnostics
           path: |
+            build/windows/configure.log
+            build/windows/build.log
             build/windows/CMakeFiles/CMakeError.log
             build/windows/CMakeFiles/CMakeOutput.log
           if-no-files-found: ignore

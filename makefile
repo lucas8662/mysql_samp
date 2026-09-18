@@ -5,7 +5,8 @@ CONNECTOR_BUILD_DIR ?= $(CONNECTOR_DIR)/build-linux-x86
 
 
 COMPILE_FLAGS = -c -O3 -w -fPIC -DLINUX -Wall -I libs/ -I libs/sdk/amx/ -I $(CONNECTOR_DIR)/include -I $(CONNECTOR_BUILD_DIR)/include
-LIBRARIES = -pthread -lrt -Wl,-Bstatic -lboost_thread -lboost_chrono -lboost_date_time -lboost_system -lboost_atomic -lmariadbclient -Wl,-Bdynamic -lssl -lcrypto -lz -ldl
+DYNAMIC_LIBRARIES = -Wl,-Bstatic -lboost_thread -lboost_chrono -lboost_date_time -lboost_system -lboost_atomic -lmariadbclient -Wl,-Bdynamic -lssl -lcrypto -lz -ldl -pthread -lrt
+STATIC_LIBRARIES = -Wl,-Bstatic -lboost_thread -lboost_chrono -lboost_date_time -lboost_system -lboost_atomic -lmariadbclient -lssl -lcrypto -Wl,-Bdynamic -lz -ldl -pthread -lrt
 
 
 all: connector compile dynamic_link static_link clean
@@ -13,7 +14,7 @@ dynamic: connector compile dynamic_link clean
 static: connector compile static_link clean
 
 connector:
-	@CC="gcc" CXX="g++" cmake -S $(CONNECTOR_DIR) -B $(CONNECTOR_BUILD_DIR) -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-m32" -DCMAKE_CXX_FLAGS="-m32" -DWITH_SSL=OPENSSL -DCLIENT_PLUGIN_CACHING_SHA2_PASSWORD=STATIC -DCLIENT_PLUGIN_SHA256_PASSWORD=STATIC
+	@CC="gcc" CXX="g++" cmake -S $(CONNECTOR_DIR) -B $(CONNECTOR_BUILD_DIR) -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-m32" -DCMAKE_CXX_FLAGS="-m32" -DWITH_SSL=OPENSSL -DOPENSSL_USE_STATIC_LIBS=TRUE -DCLIENT_PLUGIN_CACHING_SHA2_PASSWORD=STATIC -DCLIENT_PLUGIN_SHA256_PASSWORD=STATIC
 	@cmake --build $(CONNECTOR_BUILD_DIR) --target mariadbclient --parallel
 
 compile:
@@ -26,12 +27,12 @@ compile:
 
 link:
 	@echo Linking plugin..
-	@ $(GPP) -O2 -fshort-wchar -shared -Wl,-z,defs -o "bin/mysql.so" *.o -L $(CONNECTOR_BUILD_DIR)/libmariadb $(LIBRARIES)
+	@ $(GPP) -O2 -fshort-wchar -shared -Wl,-z,defs -o "bin/mysql.so" *.o -L $(CONNECTOR_BUILD_DIR)/libmariadb $(DYNAMIC_LIBRARIES)
 
 dynamic_link: link
 
 static_link: link
-	@cp "bin/mysql.so" "bin/mysql_static.so"
+	@ $(GPP) -O2 -fshort-wchar -shared -Wl,-z,defs -o "bin/mysql_static.so" *.o -L $(CONNECTOR_BUILD_DIR)/libmariadb $(STATIC_LIBRARIES)
 
 clean:
 	@ rm -f *.o

@@ -17,6 +17,10 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(WITH_SSL OPENSSL CACHE STRING "" FORCE)
 set(CLIENT_PLUGIN_CACHING_SHA2_PASSWORD STATIC CACHE STRING "" FORCE)
 set(CLIENT_PLUGIN_SHA256_PASSWORD STATIC CACHE STRING "" FORCE)
+# MariaDB Connector/C omits this default when built as a subproject.  Its
+# dynamic authentication plugins still declare install rules, and CMake
+# requires a destination even though this project only ships mysql.dll.
+set(INSTALL_PLUGINDIR "lib/mariadb/plugin" CACHE PATH "" FORCE)
 
 add_subdirectory(third_party/mariadb-connector-c)
 
