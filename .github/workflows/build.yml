@@ -1,0 +1,56 @@
+name: Build plugin
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  linux-x86:
+    name: Linux x86
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Build in Ubuntu 20.04
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/work" -w /work ubuntu:20.04 bash -c '
+            set -e
+            dpkg --add-architecture i386
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              cmake g++-multilib make libboost-thread-dev:i386 libboost-chrono-dev:i386 \
+              libboost-date-time-dev:i386 libboost-system-dev:i386 libboost-atomic-dev:i386 \
+              libssl-dev:i386 zlib1g-dev:i386
+            make all
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mysql-plugin-linux-x86
+          path: |
+            bin/mysql.so
+            bin/mysql_static.so
+
+  windows-x86:
+    name: Windows x86
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install boost-atomic boost-chrono boost-date-time boost-system boost-thread openssl --triplet x86-windows-static-md
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake -S . -B build/windows -A Win32 -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x86-windows-static-md
+          cmake --build build/windows --config Release --parallel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mysql-plugin-windows-x86
+          path: build/windows/Release/mysql.dll

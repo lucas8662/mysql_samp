@@ -1,0 +1,38 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="SDK">
+      <UniqueIdentifier>{c071e10a-a2d4-48c3-b516-edcfb19bbb05}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\CScripting.h" />
+    <ClInclude Include="src\main.h" />
+    <ClInclude Include="src\misc.h" />
+    <ClInclude Include="src\CCallback.h" />
+    <ClInclude Include="src\CMySQLQuery.h" />
+    <ClInclude Include="src\CMySQLResult.h" />
+    <ClInclude Include="src\CMySQLHandle.h" />
+    <ClInclude Include="src\CLog.h" />
+    <ClInclude Include="src\COrm.h" />
+    <ClInclude Include="src\CMySQLConnection.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\CScripting.cpp" />
+    <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\misc.cpp" />
+    <ClCompile Include="src\CCallback.cpp" />
+    <ClCompile Include="src\CMySQLQuery.cpp" />
+    <ClCompile Include="src\CMySQLResult.cpp" />
+    <ClCompile Include="src\CMySQLHandle.cpp" />
+    <ClCompile Include="src\CLog.cpp" />
+    <ClCompile Include="src\COrm.cpp" />
+    <ClCompile Include="src\CMySQLConnection.cpp" />
+    <ClCompile Include="libs\sdk\amxplugin.cpp">
+      <Filter>SDK</Filter>
+    </ClCompile>
+    <ClCompile Include="libs\sdk\amxplugin2.cpp">
+      <Filter>SDK</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>
