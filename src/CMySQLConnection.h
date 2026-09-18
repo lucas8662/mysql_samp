@@ -27,11 +27,22 @@ using std::queue;
 
 class CMySQLQuery;
 
+struct CMySQLTLSOptions
+{
+	CMySQLTLSOptions() : Enabled(false) {}
+
+	bool Enabled;
+	string KeyFile;
+	string CertFile;
+	string CAFile;
+	string CAPath;
+	string Cipher;
+};
 
 class CMySQLConnection
 {
 public:
-	static CMySQLConnection *Create(string &host, string &user, string &passwd, string &db, size_t port, bool auto_reconnect, bool threaded = true);
+	static CMySQLConnection *Create(string &host, string &user, string &passwd, string &db, size_t port, bool auto_reconnect, bool threaded = true, const CMySQLTLSOptions& tls = CMySQLTLSOptions());
 	void Destroy();
 
 	//(dis)connect to the MySQL server
@@ -56,14 +67,16 @@ public:
 
 	inline bool operator==(CMySQLConnection &rhs)
 	{
-		return (rhs.m_Host.compare(m_Host) == 0 && rhs.m_User.compare(m_User) == 0 && rhs.m_Database.compare(m_Database) == 0 && rhs.m_Passw.compare(m_Passw) == 0);
+		return (rhs.m_Host.compare(m_Host) == 0 && rhs.m_User.compare(m_User) == 0 && rhs.m_Database.compare(m_Database) == 0 && rhs.m_Passw.compare(m_Passw) == 0
+			&& rhs.m_TLS.Enabled == m_TLS.Enabled && rhs.m_TLS.KeyFile == m_TLS.KeyFile && rhs.m_TLS.CertFile == m_TLS.CertFile
+			&& rhs.m_TLS.CAFile == m_TLS.CAFile && rhs.m_TLS.CAPath == m_TLS.CAPath && rhs.m_TLS.Cipher == m_TLS.Cipher);
 	}
 
 private: //functions
 	void ProcessQueries();
 
 private: //variables
-	CMySQLConnection(string &host, string &user, string &passw, string &db, size_t port, bool auto_reconnect, bool threaded);
+	CMySQLConnection(string &host, string &user, string &passw, string &db, size_t port, bool auto_reconnect, bool threaded, const CMySQLTLSOptions& tls);
 	~CMySQLConnection();
 
 
@@ -93,6 +106,7 @@ private: //variables
 
 	//automatic reconnect
 	bool m_AutoReconnect;
+	CMySQLTLSOptions m_TLS;
 
 	//internal MYSQL pointer
 	MYSQL *m_Connection;

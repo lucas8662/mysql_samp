@@ -9,9 +9,9 @@ namespace chrono = boost::chrono;
 namespace this_thread = boost::this_thread;
 
 
-CMySQLConnection *CMySQLConnection::Create(string &host, string &user, string &passwd, string &db, unsigned int port, bool auto_reconnect, bool threaded /*= true*/)
+CMySQLConnection *CMySQLConnection::Create(string &host, string &user, string &passwd, string &db, unsigned int port, bool auto_reconnect, bool threaded /*= true*/, const CMySQLTLSOptions& tls)
 {
-	return new CMySQLConnection(host, user, passwd, db, port, auto_reconnect, threaded);
+	return new CMySQLConnection(host, user, passwd, db, port, auto_reconnect, threaded, tls);
 }
 
 void CMySQLConnection::Destroy()
@@ -21,7 +21,7 @@ void CMySQLConnection::Destroy()
 	delete this;
 }
 
-CMySQLConnection::CMySQLConnection(string &host, string &user, string &passw, string &db, size_t port, bool auto_reconnect, bool threaded)
+CMySQLConnection::CMySQLConnection(string &host, string &user, string &passw, string &db, size_t port, bool auto_reconnect, bool threaded, const CMySQLTLSOptions& tls)
 	: 
 	m_QueryThreadRunning(true),
 	m_QueryThread(NULL),
@@ -34,6 +34,7 @@ CMySQLConnection::CMySQLConnection(string &host, string &user, string &passw, st
 
 	m_IsConnected(false),
 	m_AutoReconnect(auto_reconnect),
+	m_TLS(tls),
 
 	m_Connection(NULL)
 {
@@ -82,7 +83,23 @@ bool CMySQLConnection::Connect()
 				CLog::Get()->LogFunction(LOG_ERROR, "CMySQLConnection::Connect", "MySQL initialization failed");
 		}
 
-		if (!m_IsConnected && !mysql_real_connect(m_Connection, m_Host.c_str(), m_User.c_str(), m_Passw.c_str(), m_Database.c_str(), m_Port, NULL, CLIENT_MULTI_RESULTS))
+		if (!m_IsConnected && m_TLS.Enabled)
+		{
+			const int tlsResult = mysql_ssl_set(
+				m_Connection,
+				m_TLS.KeyFile.empty() ? NULL : m_TLS.KeyFile.c_str(),
+				m_TLS.CertFile.empty() ? NULL : m_TLS.CertFile.c_str(),
+				m_TLS.CAFile.empty() ? NULL : m_TLS.CAFile.c_str(),
+				m_TLS.CAPath.empty() ? NULL : m_TLS.CAPath.c_str(),
+				m_TLS.Cipher.empty() ? NULL : m_TLS.Cipher.c_str());
+			if (tlsResult != 0)
+			{
+				CLog::Get()->LogFunction(LOG_ERROR, "CMySQLConnection::Connect", "unable to configure TLS: %s", mysql_error(m_Connection));
+				return false;
+			}
+		}
+
+		if (!m_IsConnected && !mysql_real_connect(m_Connection, m_Host.c_str(), m_User.c_str(), m_Passw.c_str(), m_Database.c_str(), m_Port, NULL, CLIENT_MULTI_RESULTS | (m_TLS.Enabled ? CLIENT_SSL : 0)))
 		{
 			CLog::Get()->LogFunction(LOG_ERROR, "CMySQLConnection::Connect", "(error #%d) %s", mysql_errno(m_Connection), mysql_error(m_Connection));
 

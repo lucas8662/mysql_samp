@@ -8,6 +8,7 @@
 #include <set>
 #include <boost/function.hpp>
 #include <boost/atomic.hpp>
+#include "CMySQLConnection.h"
 
 using std::string;
 using boost::unordered_map;
@@ -17,7 +18,6 @@ using boost::atomic;
 
 
 class CMySQLQuery;
-class CMySQLConnection;
 class CMySQLResult;
 
 
@@ -44,7 +44,7 @@ public:
 	}
 
 	//fabric function
-	static CMySQLHandle *Create(string host, string user, string pass, string db, size_t port, size_t pool_size, bool reconnect);
+	static CMySQLHandle *Create(string host, string user, string pass, string db, size_t port, size_t pool_size, bool reconnect, const CMySQLTLSOptions& tls = CMySQLTLSOptions());
 	//delete function, call this instead of delete operator!
 	void Destroy();
 	//returns MySQL handle by id

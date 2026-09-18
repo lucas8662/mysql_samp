@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 project(samp_mysql_plugin LANGUAGES C CXX)
 
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 NEW)
+endif()
+
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -16,7 +20,9 @@ set(CLIENT_PLUGIN_SHA256_PASSWORD STATIC CACHE STRING "" FORCE)
 
 add_subdirectory(third_party/mariadb-connector-c)
 
-find_package(Boost REQUIRED COMPONENTS atomic chrono date_time system thread)
+# vcpkg exports BoostConfig.cmake.  Config mode avoids CMake 4's removed
+# FindBoost compatibility module and works with the Windows static-md triplet.
+find_package(Boost CONFIG REQUIRED COMPONENTS atomic chrono date_time system thread)
 
 file(GLOB PLUGIN_SOURCES CONFIGURE_DEPENDS src/*.cpp libs/sdk/*.cpp libs/sdk/amx/*.c)
 add_library(mysql_plugin SHARED ${PLUGIN_SOURCES})

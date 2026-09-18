@@ -1,55 +1,162 @@
-MySQL Plugin for San Andreas Multiplayer (SA:MP) [![Build Status](https://travis-ci.org/pBlueG/SA-MP-MySQL.svg?branch=master)](https://travis-ci.org/pBlueG/SA-MP-MySQL)
-------------------------------------------------
-*The best and most famous MySQL plugin for SA:MP out there!*
+# Plugin MySQL para SA:MP / open.mp
 
-**This plugin allows you to use MySQL in PAWN. It's currently being developed by maddinat0r.**
+Plugin R39-6 para Pawn, atualizado para usar o **MariaDB Connector/C 3.4.9**.
+Ele mantém as mesmas natives e a mesma include `a_mysql.inc`, portanto os
+gamemodes existentes não precisam ser alterados.
 
-How to install
---------------
-Move *mysql.dll* (Windows) or *mysql.so* (Linux) to your `plugins/` directory. The Linux build in this repository includes MariaDB Connector/C 3.4.9 and supports MySQL 8 password authentication, including `caching_sha2_password`.
-You'll have to edit the server configuration (*server.cfg*) as follows:
-#### Windows
-<pre>plugins mysql</pre>
+O MariaDB Connector/C é compatível com servidores MySQL e MariaDB. A mudança
+resolve a limitação do conector antigo ao conectar em MySQL 8 com senha e
+suporta os métodos de autenticação `caching_sha2_password` e
+`sha256_password`.
 
-#### Linux
-<pre>plugins mysql.so</pre>
+## Instalação
 
-F.A.Q.
-------
-Q: *Do I need to install `libmysqlclient` on Linux?*  
-A: No. The updated Linux plugin embeds MariaDB Connector/C. It still requires the 32-bit OpenSSL 1.1 runtime because the server and plugin target Linux x86.
+Copie o binário correspondente para a pasta `plugins` do servidor e carregue-o
+na configuração do servidor:
 
-Q: *The plugin just fails to load on Windows, how can I fix this?*  
-A: You have to install the Microsoft C++ redistributables ([2010 (x86)](http://www.microsoft.com/en-us/download/details.aspx?id=5555), [2010 SP1 (x86)](http://www.microsoft.com/en-us/download/details.aspx?id=8328) and [2012 (x86)](http://www.microsoft.com/en-us/download/details.aspx?id=30679)).
+```text
+plugins mysql.so
+```
 
-Q: *I get a ton of debug messages regarding connections even though I'm calling* `mysql_connect` *only once, why is that so?*  
-A: That's because the plugin uses multiple direct database connections per connection handle. The number of direct connections (and thus the number of those log messages) is 2+pool_size.  
+No Windows, use `mysql.dll` e carregue o plugin como `mysql`.
 
-Build instruction
----------------
-GitHub Actions builds downloadable Linux x86 and Windows x86 artifacts on each push to `master`, pull request, tag starting with `v`, or manual workflow run.
+Os binários Linux são x86 (32 bits), pois devem ter a mesma arquitetura do
+servidor open.mp usado neste projeto. `mysql.so` e `mysql_static.so` têm o
+mesmo conteúdo: ambos incluem o conector MariaDB estaticamente.
 
-#### Windows
-1. Install Microsoft Visual Studio C++ (2012 or newer, the Express version also works) and the [MySQL C Connector (32-bit)](http://dev.mysql.com/downloads/connector/c/)
-2. Install the [boost libraries (version 1.55 or higher)](http://www.boost.org/users/download/)
-3. Open the solution file with Visual Studio -> right click on the project -> Properties -> VC++ Directories, use *Release* as configuration and adjust the paths to the previously installed libraries
-4. Build the solution with *Release* as configuration
+### Dependências em Linux
 
-#### Linux
-1. Install 32-bit build dependencies: `g++-multilib cmake libssl-dev:i386 zlib1g-dev:i386` and the 32-bit Boost thread, chrono, date-time, system and atomic development packages.
-2. The MariaDB Connector/C 3.4.9 source is included in `third_party/mariadb-connector-c`.
-3. Navigate to the project root directory and execute `make`. This builds the connector with the MySQL 8 password plugins statically included, then produces `bin/mysql.so` and `bin/mysql_static.so`.
+Não é necessário instalar `libmysqlclient` ou `libmariadb` no servidor: o
+conector já está no plugin. O host ainda precisa das bibliotecas de execução
+de 32 bits do Ubuntu 20.04, inclusive OpenSSL 1.1, C/C++ e pthread.
 
-Thanks to
----------
-- AndreT (testing/several tutorials)
-- DamianC (testing reports)
-- JernejL (testing/suggestions)
-- krisk (testing/suggestions)
-- Kye (coding support)
-- maddinat0r (developing the plugin as of R8)
-- Mow (compiling/testing/hosting)
-- nemesis (testing)
-- Sergei (testing/suggestions/wiki documentation)
-- xxmitsu (testing/compiling)
-# mysql_samp
+## Compatibilidade com banco de dados
+
+| Servidor | Suporte |
+| --- | --- |
+| MySQL 5.7 | Sim |
+| MySQL 8.x | Sim, inclusive `caching_sha2_password` e `sha256_password` |
+| MariaDB | Sim |
+
+As chamadas Pawn continuam iguais. Por exemplo:
+
+```pawn
+new MySQL:g_SQL = mysql_connect("127.0.0.1", "usuario", "banco", "senha");
+```
+
+Use uma conta com permissões para o banco informado e confirme o erro completo
+em `mysql_log.txt` caso a conexão falhe. O plugin registra o código e a mensagem
+retornados pelo servidor MySQL/MariaDB.
+
+## Alterações desta atualização
+
+- MariaDB Connector/C 3.4.9 incluído em `third_party/mariadb-connector-c`.
+- Plugins de autenticação MySQL 8 compilados de forma estática.
+- Removida a dependência antiga de `libmysqlclient_r`.
+- Corrigida a cópia do cache de resultados para usar `mysql_fetch_lengths()`,
+  sem depender do layout interno do conector.
+- Adicionadas novas natives compatíveis com R39-6: conexão via arquivo,
+  conexão TLS, mensagem de erro e execução de arquivos SQL.
+- Adicionado CMake para a compilação Windows e workflow do GitHub Actions.
+
+## Novas natives, sem quebrar R39-6
+
+As natives R39-6 existentes permanecem com a mesma assinatura. As opções abaixo
+são adicionais e podem ser adotadas gradualmente.
+
+### Mensagem de erro
+
+```pawn
+new error[128];
+mysql_error(error, g_SQL, sizeof error);
+printf("MySQL: %s", error);
+```
+
+`mysql_error` retorna a mensagem do último comando executado sem thread no
+handle informado. Para falhas em consultas com thread, continue usando
+`OnQueryError` e `mysql_log.txt`.
+
+### Conexão por arquivo e TLS
+
+Copie [mysql.ini.example](mysql.ini.example) como `mysql.ini` para a raiz do
+servidor, preencha as credenciais e conecte sem deixá-las no gamemode:
+
+```pawn
+new g_SQL = mysql_connect_file("mysql.ini");
+```
+
+O arquivo aceita `host`, `user`, `password`, `database`, `port`,
+`auto_reconnect`, `pool_size`, `ssl_enable`, `ssl_key_file`, `ssl_cert_file`,
+`ssl_ca_file`, `ssl_ca_path` e `ssl_cipher`. Quando `ssl_enable = true`, as
+conexões principal, em thread e do pool usam TLS.
+
+Também há a versão direta para TLS, mantendo a ordem de argumentos R39-6:
+
+```pawn
+new g_SQL = mysql_connect_ssl(
+    "db.exemplo.com", "usuario", "banco", "senha",
+    "client-key.pem", "client-cert.pem", "ca.pem"
+);
+```
+
+### Arquivos SQL
+
+Guarde o arquivo em `scriptfiles`, por exemplo `scriptfiles/schema.sql`, e use:
+
+```pawn
+mysql_tquery_file(g_SQL, "schema.sql", "OnSchemaReady");
+// ou, de forma síncrona:
+mysql_query_file(g_SQL, "schema.sql");
+```
+
+As queries do arquivo são separadas por `;`. Na forma em thread, o callback é
+chamado apenas após a última query; qualquer falha chama `OnQueryError`. Na
+forma síncrona, `use_cache = true` salva somente o resultado da última query.
+
+## Compilação local
+
+### Linux x86
+
+Instale compilador, CMake, bibliotecas Boost de 32 bits, OpenSSL de 32 bits e
+zlib de 32 bits. Em Ubuntu 20.04, por exemplo:
+
+```bash
+sudo dpkg --add-architecture i386
+sudo apt update
+sudo apt install cmake g++-multilib make \
+  libboost-thread-dev:i386 libboost-chrono-dev:i386 \
+  libboost-date-time-dev:i386 libboost-system-dev:i386 \
+  libboost-atomic-dev:i386 libssl-dev:i386 zlib1g-dev:i386
+make all
+```
+
+Os arquivos gerados ficam em `bin/mysql.so` e `bin/mysql_static.so`.
+
+### Windows x86
+
+O projeto usa CMake, Visual Studio e vcpkg. Instale as dependências com o
+triplet `x86-windows-static-md`:
+
+```powershell
+vcpkg install boost-atomic boost-chrono boost-date-time boost-system boost-thread openssl --triplet x86-windows-static-md
+cmake -S . -B build/windows -A Win32 -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="<vcpkg>/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x86-windows-static-md
+cmake --build build/windows --config Release --parallel
+```
+
+O resultado é `build/windows/Release/mysql.dll`.
+
+## GitHub Actions
+
+O workflow em `.github/workflows/build.yml` roda em push para `master`, pull
+request, tag iniciada por `v` ou execução manual. Ele publica artefatos
+separados para:
+
+- Linux x86: `mysql.so` e `mysql_static.so`, compilados em Ubuntu 20.04.
+- Windows x86: `mysql.dll`.
+
+## Validação feita
+
+O binário Linux foi compilado e verificado em Ubuntu 20.04 x86. Ele não depende
+de `libmysqlclient`, contém o plugin `caching_sha2_password` e não apresentou
+bibliotecas ou símbolos ausentes. A validação contra o banco real depende das
+credenciais e das permissões do ambiente em que o servidor for executado.

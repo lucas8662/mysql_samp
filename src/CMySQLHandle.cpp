@@ -37,12 +37,12 @@ CMySQLHandle::~CMySQLHandle()
 	CLog::Get()->LogFunction(LOG_DEBUG, "CMySQLHandle::~CMySQLHandle", "deconstructor called");
 }
 
-CMySQLHandle *CMySQLHandle::Create(string host, string user, string pass, string db, size_t port, size_t pool_size, bool reconnect) 
+CMySQLHandle *CMySQLHandle::Create(string host, string user, string pass, string db, size_t port, size_t pool_size, bool reconnect, const CMySQLTLSOptions& tls) 
 {
 	CLog::Get()->LogFunction(LOG_DEBUG, "CMySQLHandle::Create", "creating new connection..");
 
 	CMySQLHandle *handle = NULL;
-	CMySQLConnection *main_connection = CMySQLConnection::Create(host, user, pass, db, port, reconnect, false);
+	CMySQLConnection *main_connection = CMySQLConnection::Create(host, user, pass, db, port, reconnect, false, tls);
 
 	if (MySQLOptions.DuplicateConnections == false && SQLHandle.size() > 0) 
 	{
@@ -77,10 +77,10 @@ CMySQLHandle *CMySQLHandle::Create(string host, string user, string pass, string
 
 		//init connections
 		handle->m_MainConnection = main_connection;
-		handle->m_ThreadConnection = CMySQLConnection::Create(host, user, pass, db, port, reconnect);
+		handle->m_ThreadConnection = CMySQLConnection::Create(host, user, pass, db, port, reconnect, true, tls);
 
 		for (size_t i = 0; i < pool_size; ++i)
-			handle->m_ConnectionPool.insert(CMySQLConnection::Create(host, user, pass, db, port, reconnect));
+			handle->m_ConnectionPool.insert(CMySQLConnection::Create(host, user, pass, db, port, reconnect, true, tls));
 		handle->m_CurrentConPoolPos = handle->m_ConnectionPool.begin();
 
 		SQLHandle.insert( unordered_map<unsigned int, CMySQLHandle*>::value_type(id, handle) );

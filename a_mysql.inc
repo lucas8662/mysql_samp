@@ -102,6 +102,8 @@ native orm_setkey(ORM:id, varname[]);
 // MySQL functions
 native mysql_log(E_MYSQL_LOGLEVEL:loglevel = LOG_ERROR | LOG_WARNING, E_MYSQL_LOGTYPE:logtype = LOG_TYPE_TEXT);
 native mysql_connect(const host[], const user[], const database[], const password[], port = 3306, bool:autoreconnect = true, pool_size = 2);
+native mysql_connect_ssl(const host[], const user[], const database[], const password[], const key_file[] = "", const cert_file[] = "", const ca_file[] = "", const ca_path[] = "", const cipher[] = "", port = 3306, bool:autoreconnect = true, pool_size = 2);
+native mysql_connect_file(const file_name[] = "mysql.ini");
 native mysql_close(connectionHandle = 1);
 native mysql_reconnect(connectionHandle = 1);
 
@@ -110,6 +112,7 @@ native mysql_current_handle();
 native mysql_option(E_MYSQL_OPTION:type, value);
 
 native mysql_errno(connectionHandle = 1);
+native mysql_error(destination[], connectionHandle = 1, max_len = sizeof(destination));
 native mysql_escape_string(const source[], destination[], connectionHandle = 1, max_len = sizeof(destination));
 native mysql_format(connectionHandle, output[], len, format[], {Float,_}:...);
 native mysql_pquery(connectionHandle, query[], callback[] = "", format[] = "", {Float,_}:...);
@@ -121,6 +124,8 @@ native mysql_tquery(connectionHandle, query[], callback[] = "", format[] = "", {
 native mysql_tquery_inline(connHandle, query[], callback:Callback, format[], {Float,_}:...); //y_inline
 */
 native Cache:mysql_query(conhandle, query[], bool:use_cache = true);
+native mysql_tquery_file(connectionHandle, const file_path[], callback[] = "", format[] = "", {Float,_}:...);
+native Cache:mysql_query_file(connectionHandle, const file_path[], bool:use_cache = false);
 
 native mysql_stat(destination[], connectionHandle = 1, max_len = sizeof(destination));
 native mysql_get_charset(destination[], connectionHandle = 1, max_len = sizeof(destination));

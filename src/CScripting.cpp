@@ -11,6 +11,127 @@
 
 #include "misc.h"
 
+#include <algorithm>
+#include <cctype>
+#include <fstream>
+#include <vector>
+
+static string Trim(const string& value)
+{
+	const size_t begin = value.find_first_not_of(" \t\r\n");
+	if (begin == string::npos)
+		return string();
+	const size_t end = value.find_last_not_of(" \t\r\n");
+	return value.substr(begin, end - begin + 1);
+}
+
+static bool ParseBoolean(const string& value, bool& output)
+{
+	string normalized = Trim(value);
+	std::transform(normalized.begin(), normalized.end(), normalized.begin(), ::tolower);
+	if (normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on")
+	{
+		output = true;
+		return true;
+	}
+	if (normalized == "0" || normalized == "false" || normalized == "no" || normalized == "off")
+	{
+		output = false;
+		return true;
+	}
+	return false;
+}
+
+static bool ParseUnsigned(const string& value, size_t& output)
+{
+	const string normalized = Trim(value);
+	if (normalized.empty())
+		return false;
+	char* end = NULL;
+	const unsigned long parsed = strtoul(normalized.c_str(), &end, 10);
+	if (*end != '\0')
+		return false;
+	output = static_cast<size_t>(parsed);
+	return true;
+}
+
+static bool LoadConnectionFile(const string& path, string& host, string& user, string& database, string& password, size_t& port, bool& autoReconnect, size_t& poolSize, CMySQLTLSOptions& tls, string& error)
+{
+	std::ifstream file(path.c_str());
+	if (!file)
+	{
+		error = "unable to open connection file";
+		return false;
+	}
+
+	string line;
+	while (std::getline(file, line))
+	{
+		line = Trim(line);
+		if (line.empty() || line[0] == '#' || line[0] == ';')
+			continue;
+		const size_t separator = line.find('=');
+		if (separator == string::npos)
+			continue;
+		string key = Trim(line.substr(0, separator));
+		string value = Trim(line.substr(separator + 1));
+		std::transform(key.begin(), key.end(), key.begin(), ::tolower);
+
+		if (key == "hostname" || key == "host") host = value;
+		else if (key == "username" || key == "user") user = value;
+		else if (key == "database") database = value;
+		else if (key == "password") password = value;
+		else if (key == "server_port" || key == "port") ParseUnsigned(value, port);
+		else if (key == "auto_reconnect") ParseBoolean(value, autoReconnect);
+		else if (key == "pool_size") ParseUnsigned(value, poolSize);
+		else if (key == "ssl_enable") ParseBoolean(value, tls.Enabled);
+		else if (key == "ssl_key_file") tls.KeyFile = value;
+		else if (key == "ssl_cert_file") tls.CertFile = value;
+		else if (key == "ssl_ca_file") tls.CAFile = value;
+		else if (key == "ssl_ca_path") tls.CAPath = value;
+		else if (key == "ssl_cipher") tls.Cipher = value;
+	}
+
+	if (host.empty() || user.empty() || database.empty())
+	{
+		error = "host, user, or database is missing";
+		return false;
+	}
+	return true;
+}
+
+static bool ParseQueriesFromFile(const string& path, vector<string>& queries)
+{
+	std::ifstream file(path.c_str());
+	if (!file)
+		return false;
+
+	string current;
+	string line;
+	while (std::getline(file, line))
+	{
+		const size_t lineComment = line.find("-- ");
+		const size_t hashComment = line.find('#');
+		const size_t comment = std::min(lineComment, hashComment);
+		if (comment != string::npos)
+			line.erase(comment);
+		line.push_back(' ');
+		size_t separator = 0;
+		while ((separator = line.find(';')) != string::npos)
+		{
+			current.append(line.substr(0, separator + 1));
+			line.erase(0, separator + 1);
+			if (!Trim(current).empty())
+				queries.push_back(current);
+			current.clear();
+		}
+		current.append(line);
+	}
+	if (!Trim(current).empty())
+		queries.push_back(current);
+	return true;
+}
+
 
 //native ORM:orm_create(table[], connectionHandle = 1);
 AMX_DECLARE_NATIVE(Native::orm_create)
@@ -744,6 +865,62 @@ AMX_DECLARE_NATIVE(Native::mysql_connect)
 	return static_cast<cell>(Handle->GetID());
 }
 
+//native mysql_connect_ssl(const host[], const user[], const database[], const password[], const key_file[] = "", const cert_file[] = "", const ca_file[] = "", const ca_path[] = "", const cipher[] = "", port = 3306, bool:autoreconnect = true, pool_size = 2);
+AMX_DECLARE_NATIVE(Native::mysql_connect_ssl)
+{
+	const char *host = NULL, *user = NULL, *database = NULL, *password = NULL;
+	const char *keyFile = NULL, *certFile = NULL, *caFile = NULL, *caPath = NULL, *cipher = NULL;
+	amx_StrParam(amx, params[1], host);
+	amx_StrParam(amx, params[2], user);
+	amx_StrParam(amx, params[3], database);
+	amx_StrParam(amx, params[4], password);
+	amx_StrParam(amx, params[5], keyFile);
+	amx_StrParam(amx, params[6], certFile);
+	amx_StrParam(amx, params[7], caFile);
+	amx_StrParam(amx, params[8], caPath);
+	amx_StrParam(amx, params[9], cipher);
+
+	if (host == NULL || user == NULL || database == NULL)
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_connect_ssl", "empty connection data specified");
+
+	CMySQLTLSOptions tls;
+	tls.Enabled = true;
+	tls.KeyFile = keyFile != NULL ? keyFile : "";
+	tls.CertFile = certFile != NULL ? certFile : "";
+	tls.CAFile = caFile != NULL ? caFile : "";
+	tls.CAPath = caPath != NULL ? caPath : "";
+	tls.Cipher = cipher != NULL ? cipher : "";
+
+	const size_t port = params[10];
+	const bool autoReconnect = params[11] != 0;
+	const size_t poolSize = params[12];
+	CMySQLHandle *handle = CMySQLHandle::Create(host, user, password != NULL ? password : "", database, port, poolSize, autoReconnect, tls);
+	handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Connect, _1));
+	return static_cast<cell>(handle->GetID());
+}
+
+//native mysql_connect_file(const file_name[] = "mysql.ini");
+AMX_DECLARE_NATIVE(Native::mysql_connect_file)
+{
+	const char *fileName = NULL;
+	amx_StrParam(amx, params[1], fileName);
+	const string name = fileName != NULL ? fileName : "mysql.ini";
+	if (name.empty() || name.find("..") != string::npos || name.find_first_of("/\\") != string::npos)
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_connect_file", "connection file must be in the server root");
+
+	string host, user, database, password, error;
+	size_t port = 3306;
+	size_t poolSize = 2;
+	bool autoReconnect = true;
+	CMySQLTLSOptions tls;
+	if (!LoadConnectionFile(name, host, user, database, password, port, autoReconnect, poolSize, tls, error))
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_connect_file", "%s (%s)", error.c_str(), name.c_str());
+
+	CMySQLHandle *handle = CMySQLHandle::Create(host, user, password, database, port, poolSize, autoReconnect, tls);
+	handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Connect, _1));
+	return static_cast<cell>(handle->GetID());
+}
+
 //native mysql_close(connectionHandle = 1);
 AMX_DECLARE_NATIVE(Native::mysql_close)
 {
@@ -956,6 +1133,92 @@ AMX_DECLARE_NATIVE(Native::mysql_query)
 	delete query.Result;
 
 	return static_cast<cell>(stored_result_id);
+}
+
+//native mysql_tquery_file(connectionHandle, const file_path[], callback[] = "", format[] = "", {Float,_}:...);
+AMX_DECLARE_NATIVE(Native::mysql_tquery_file)
+{
+	static const int ConstParamCount = 4;
+	const unsigned int connectionID = params[1];
+	const char *fileName = NULL, *callbackName = NULL, *callbackFormat = NULL;
+	amx_StrParam(amx, params[2], fileName);
+	amx_StrParam(amx, params[3], callbackName);
+	amx_StrParam(amx, params[4], callbackFormat);
+
+	if (!CMySQLHandle::IsValid(connectionID))
+		return ERROR_INVALID_CONNECTION_HANDLE("mysql_tquery_file", connectionID);
+	if (fileName == NULL || string(fileName).find("..") != string::npos || string(fileName).find_first_of("/\\") != string::npos)
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_tquery_file", "file must be inside scriptfiles");
+	if (callbackFormat != NULL && strlen(callbackFormat) != ((params[0] / 4) - ConstParamCount))
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_tquery_file", "callback parameter count does not match format specifier length");
+
+	vector<string> queries;
+	const string path = string("scriptfiles/") + fileName;
+	if (!ParseQueriesFromFile(path, queries) || queries.empty())
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_tquery_file", "unable to parse queries from %s", path.c_str());
+
+	CMySQLHandle *handle = CMySQLHandle::GetHandle(connectionID);
+	for (size_t index = 0; index < queries.size(); ++index)
+	{
+		CMySQLQuery *query = new CMySQLQuery;
+		query->Query = queries[index];
+		query->Handle = handle;
+		if (index + 1 == queries.size())
+		{
+			query->Callback.Name = callbackName != NULL ? callbackName : "";
+			if (callbackFormat != NULL)
+				CCallback::Get()->FillCallbackParams(query->Callback.Params, callbackFormat, amx, params, ConstParamCount);
+		}
+		handle->QueueQuery(query);
+	}
+
+	CLog::Get()->LogFunction(LOG_DEBUG, "mysql_tquery_file", "queued %d queries from %s", static_cast<int>(queries.size()), path.c_str());
+	return 1;
+}
+
+//native Cache:mysql_query_file(connectionHandle, const file_path[], bool:use_cache = false);
+AMX_DECLARE_NATIVE(Native::mysql_query_file)
+{
+	const unsigned int connectionID = params[1];
+	const char *fileName = NULL;
+	amx_StrParam(amx, params[2], fileName);
+	const bool useCache = params[3] != 0;
+
+	if (!CMySQLHandle::IsValid(connectionID))
+		return ERROR_INVALID_CONNECTION_HANDLE("mysql_query_file", connectionID);
+	if (fileName == NULL || string(fileName).find("..") != string::npos || string(fileName).find_first_of("/\\") != string::npos)
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_query_file", "file must be inside scriptfiles");
+
+	vector<string> queries;
+	const string path = string("scriptfiles/") + fileName;
+	if (!ParseQueriesFromFile(path, queries) || queries.empty())
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_query_file", "unable to parse queries from %s", path.c_str());
+
+	CMySQLHandle *handle = CMySQLHandle::GetHandle(connectionID);
+	int resultID = 0;
+	for (size_t index = 0; index < queries.size(); ++index)
+	{
+		CMySQLQuery query;
+		query.Query = queries[index];
+		query.Handle = handle;
+		query.Unthreaded = true;
+		if (!query.Execute(handle->GetMainConnection()->GetMysqlPtr()))
+		{
+			delete query.Result;
+			return 0;
+		}
+
+		if (index + 1 == queries.size() && useCache)
+		{
+			handle->SetActiveResult(query.Result);
+			resultID = handle->SaveActiveResult();
+			query.Result = NULL;
+		}
+		delete query.Result;
+	}
+
+	CLog::Get()->LogFunction(LOG_DEBUG, "mysql_query_file", "executed %d queries from %s", static_cast<int>(queries.size()), path.c_str());
+	return static_cast<cell>(resultID);
 }
 
 
@@ -1339,6 +1602,23 @@ AMX_DECLARE_NATIVE(Native::mysql_errno)
 		return -1; //don't return 0 since it means that there are no errors
 	}
 	return static_cast<cell>(mysql_errno(CMySQLHandle::GetHandle(connection_id)->GetMainConnection()->GetMysqlPtr()));
+}
+
+//native mysql_error(destination[], connectionHandle = 1, max_len = sizeof(destination));
+AMX_DECLARE_NATIVE(Native::mysql_error)
+{
+	const unsigned int connectionID = params[2];
+	const unsigned int maxSize = params[3];
+	if (!CMySQLHandle::IsValid(connectionID))
+		return ERROR_INVALID_CONNECTION_HANDLE("mysql_error", connectionID);
+
+	MYSQL *connection = CMySQLHandle::GetHandle(connectionID)->GetMainConnection()->GetMysqlPtr();
+	if (connection == NULL)
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_error", "connection is not initialized");
+
+	const char *error = mysql_error(connection);
+	amx_SetCString(amx, params[1], error != NULL ? error : "", maxSize);
+	return 1;
 }
 
 //native mysql_log(loglevel, logtype);

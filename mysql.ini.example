@@ -1,0 +1,16 @@
+# Copie para mysql.ini na raiz do servidor e ajuste os valores.
+host = 127.0.0.1
+user = usuario
+password = senha
+database = banco
+port = 3306
+auto_reconnect = true
+pool_size = 2
+
+# TLS é opcional. Ative ao conectar a um banco remoto que exige SSL.
+ssl_enable = false
+# ssl_key_file = client-key.pem
+# ssl_cert_file = client-cert.pem
+# ssl_ca_file = ca.pem
+# ssl_ca_path = certificados/
+# ssl_cipher =

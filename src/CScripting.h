@@ -39,6 +39,8 @@ namespace Native
 	//MySQL natives
 	AMX_DECLARE_NATIVE(mysql_log);
 	AMX_DECLARE_NATIVE(mysql_connect);
+	AMX_DECLARE_NATIVE(mysql_connect_ssl);
+	AMX_DECLARE_NATIVE(mysql_connect_file);
 	AMX_DECLARE_NATIVE(mysql_close);
 	AMX_DECLARE_NATIVE(mysql_reconnect);
 
@@ -47,11 +49,14 @@ namespace Native
 	AMX_DECLARE_NATIVE(mysql_option);
 
 	AMX_DECLARE_NATIVE(mysql_errno);
+	AMX_DECLARE_NATIVE(mysql_error);
 	AMX_DECLARE_NATIVE(mysql_escape_string);
 	AMX_DECLARE_NATIVE(mysql_format);
 	AMX_DECLARE_NATIVE(mysql_pquery);
 	AMX_DECLARE_NATIVE(mysql_tquery);
 	AMX_DECLARE_NATIVE(mysql_query);
+	AMX_DECLARE_NATIVE(mysql_tquery_file);
+	AMX_DECLARE_NATIVE(mysql_query_file);
 	
 	AMX_DECLARE_NATIVE(mysql_stat);
 	AMX_DECLARE_NATIVE(mysql_set_charset);
