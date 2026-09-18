@@ -160,3 +160,25 @@ O binário Linux foi compilado e verificado em Ubuntu 20.04 x86. Ele não depend
 de `libmysqlclient`, contém o plugin `caching_sha2_password` e não apresentou
 bibliotecas ou símbolos ausentes. A validação contra o banco real depende das
 credenciais e das permissões do ambiente em que o servidor for executado.
+
+
+## Prepared statements
+
+A API de prepared statements foi adicionada sem modificar as natives R39 existentes. Use `?` no SQL e associe os valores antes de executar; os valores são enviados ao MariaDB/MySQL separadamente do texto SQL.
+
+```pawn
+new MySQLStatement:stmt = mysql_stmt_prepare(1,
+    "INSERT INTO accounts (name, score) VALUES (?, ?)");
+mysql_stmt_bind_string(stmt, 0, playerName);
+mysql_stmt_bind_int(stmt, 1, score);
+mysql_stmt_execute(stmt, "OnAccountSaved", "d", playerid);
+mysql_stmt_close(stmt); // a execução que já entrou na fila continua normalmente
+
+forward OnAccountSaved(playerid);
+public OnAccountSaved(playerid)
+{
+    printf("Conta %d salva; linhas: %d", playerid, cache_affected_rows());
+}
+```
+
+Os índices dos parâmetros começam em `0`. A API atende `INSERT`, `UPDATE`, `DELETE` e `SELECT`. Em callbacks, os resultados de `SELECT` ficam disponíveis pelas natives de cache R39; consultas de alteração expõem `cache_affected_rows` e `cache_insert_id`.

@@ -99,6 +99,13 @@ extern "C" const AMX_NATIVE_INFO native_list[] =
 	AMX_DEFINE_NATIVE(mysql_query)
 	AMX_DEFINE_NATIVE(mysql_tquery_file)
 	AMX_DEFINE_NATIVE(mysql_query_file)
+
+	AMX_DEFINE_NATIVE(mysql_stmt_prepare)
+	AMX_DEFINE_NATIVE(mysql_stmt_bind_int)
+	AMX_DEFINE_NATIVE(mysql_stmt_bind_float)
+	AMX_DEFINE_NATIVE(mysql_stmt_bind_string)
+	AMX_DEFINE_NATIVE(mysql_stmt_execute)
+	AMX_DEFINE_NATIVE(mysql_stmt_close)
 	 
 	AMX_DEFINE_NATIVE(mysql_stat)
 	AMX_DEFINE_NATIVE(mysql_get_charset)

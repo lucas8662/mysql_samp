@@ -127,6 +127,17 @@ native Cache:mysql_query(conhandle, query[], bool:use_cache = true);
 native mysql_tquery_file(connectionHandle, const file_path[], callback[] = "", format[] = "", {Float,_}:...);
 native Cache:mysql_query_file(connectionHandle, const file_path[], bool:use_cache = false);
 
+// Prepared statements. Parameter indexes begin at 0.
+// mysql_stmt_execute is asynchronous and calls OnQueryError on a database error.
+// The initial implementation exposes affected rows/insert ID to callbacks for
+// INSERT, UPDATE, DELETE and SELECT. SELECT rows are available in the R39 cache.
+native MySQLStatement:mysql_stmt_prepare(connectionHandle, const query[]);
+native mysql_stmt_bind_int(MySQLStatement:statement, parameter, value);
+native mysql_stmt_bind_float(MySQLStatement:statement, parameter, Float:value);
+native mysql_stmt_bind_string(MySQLStatement:statement, parameter, const value[]);
+native mysql_stmt_execute(MySQLStatement:statement, callback[] = "", format[] = "", {Float,_}:...);
+native mysql_stmt_close(MySQLStatement:statement);
+
 native mysql_stat(destination[], connectionHandle = 1, max_len = sizeof(destination));
 native mysql_get_charset(destination[], connectionHandle = 1, max_len = sizeof(destination));
 native mysql_set_charset(charset[], connectionHandle = 1);

@@ -10,8 +10,255 @@
 namespace chrono = boost::chrono;
 
 
+static void SetPreparedQueryError(CMySQLQuery *query, const char *log_funcname, unsigned int error_id, const char *error_str)
+{
+	CLog::Get()->LogFunction(LOG_ERROR, log_funcname, "(error #%d) %s (Prepared query: \"%s\")", error_id, error_str, query->Query.c_str());
+
+	if (!query->Unthreaded)
+	{
+		query->Orm.Object = NULL;
+		query->Orm.Type = 0;
+		while (!query->Callback.Params.empty())
+			query->Callback.Params.pop();
+
+		query->Callback.Params.push(static_cast<cell>(error_id));
+		query->Callback.Params.push(string(error_str));
+		query->Callback.Params.push(query->Callback.Name);
+		query->Callback.Params.push(query->Query);
+		query->Callback.Params.push(static_cast<cell>(query->Handle->GetID()));
+		query->Callback.Name = "OnQueryError";
+	}
+}
+
+bool CMySQLQuery::StorePreparedResult(MYSQL_STMT *statement)
+{
+	MYSQL_RES *metadata = mysql_stmt_result_metadata(statement);
+	if (metadata == NULL)
+		return false;
+
+	const unsigned int fieldCount = mysql_num_fields(metadata);
+	vector<MYSQL_BIND> bindings(fieldCount);
+	vector<unsigned long> lengths(fieldCount);
+	vector<my_bool> isNull(fieldCount);
+	vector<my_bool> errors(fieldCount);
+	vector<char> placeholders(fieldCount);
+	memset(bindings.empty() ? NULL : &bindings[0], 0, bindings.size() * sizeof(MYSQL_BIND));
+	for (unsigned int field = 0; field < fieldCount; ++field)
+	{
+		bindings[field].buffer_type = MYSQL_TYPE_STRING;
+		bindings[field].buffer = &placeholders[field];
+		bindings[field].buffer_length = 1;
+		bindings[field].length = &lengths[field];
+		bindings[field].is_null = &isNull[field];
+		bindings[field].error = &errors[field];
+	}
+	if (fieldCount > 0 && mysql_stmt_bind_result(statement, &bindings[0]) != 0)
+	{
+		mysql_free_result(metadata);
+		return false;
+	}
+	if (mysql_stmt_store_result(statement) != 0)
+	{
+		mysql_free_result(metadata);
+		return false;
+	}
+
+	vector< vector<string> > values;
+	vector< vector<char> > nulls;
+	int fetchResult;
+	while ((fetchResult = mysql_stmt_fetch(statement)) != MYSQL_NO_DATA)
+	{
+		if (fetchResult != 0 && fetchResult != MYSQL_DATA_TRUNCATED)
+		{
+			mysql_stmt_free_result(statement);
+			mysql_free_result(metadata);
+			return false;
+		}
+		values.push_back(vector<string>(fieldCount));
+		nulls.push_back(vector<char>(fieldCount, 0));
+		for (unsigned int field = 0; field < fieldCount; ++field)
+		{
+			if (isNull[field])
+			{
+				nulls.back()[field] = 1;
+				continue;
+			}
+			vector<char> value(lengths[field] + 1, '\0');
+			MYSQL_BIND column;
+			memset(&column, 0, sizeof(column));
+			column.buffer_type = MYSQL_TYPE_STRING;
+			column.buffer = &value[0];
+			column.buffer_length = lengths[field];
+			column.length = &lengths[field];
+			if (mysql_stmt_fetch_column(statement, &column, field, 0) != 0)
+			{
+				mysql_stmt_free_result(statement);
+				mysql_free_result(metadata);
+				return false;
+			}
+			values.back()[field].assign(&value[0], lengths[field]);
+		}
+	}
+
+	Result = new CMySQLResult;
+	Result->m_WarningCount = mysql_stmt_warning_count(statement);
+	Result->m_Rows = values.size();
+	Result->m_Fields = fieldCount;
+	Result->m_FieldNames.reserve(fieldCount);
+	MYSQL_FIELD *field;
+	while ((field = mysql_fetch_field(metadata)) != NULL)
+		Result->m_FieldNames.push_back(field->name);
+
+	vector<size_t> rowSizes(values.size());
+	size_t memorySize = sizeof(char **) * values.size();
+	for (size_t row = 0; row < values.size(); ++row)
+	{
+		size_t rowSize = sizeof(char *) * (fieldCount + 1);
+		for (unsigned int column = 0; column < fieldCount; ++column)
+			if (!nulls[row][column])
+				rowSize += values[row][column].size() + 1;
+		const size_t alignment = sizeof(char *);
+		rowSize = (rowSize + alignment - 1) & ~(alignment - 1);
+		rowSizes[row] = rowSize;
+		memorySize += rowSize;
+	}
+	Result->m_Data = values.empty() ? NULL : static_cast<char ***>(malloc(memorySize));
+	if (!values.empty() && Result->m_Data == NULL)
+	{
+		delete Result;
+		Result = NULL;
+		mysql_stmt_free_result(statement);
+		mysql_free_result(metadata);
+		return false;
+	}
+	char *storage = values.empty() ? NULL : reinterpret_cast<char *>(&Result->m_Data[values.size()]);
+	for (size_t row = 0; row < values.size(); ++row)
+	{
+		Result->m_Data[row] = reinterpret_cast<char **>(storage);
+		char *fieldStorage = storage + sizeof(char *) * (fieldCount + 1);
+		for (unsigned int column = 0; column < fieldCount; ++column)
+		{
+			if (nulls[row][column])
+				Result->m_Data[row][column] = NULL;
+			else
+			{
+				Result->m_Data[row][column] = fieldStorage;
+				memcpy(fieldStorage, values[row][column].data(), values[row][column].size());
+				fieldStorage[values[row][column].size()] = '\0';
+				fieldStorage += values[row][column].size() + 1;
+			}
+		}
+		Result->m_Data[row][fieldCount] = NULL;
+		storage += rowSizes[row];
+	}
+	mysql_stmt_free_result(statement);
+	mysql_free_result(metadata);
+	return true;
+}
+
+bool CMySQLQuery::ExecutePrepared(MYSQL *mysql_connection)
+{
+	char log_funcname[64];
+	if (Unthreaded)
+		sprintf(log_funcname, "CMySQLQuery::ExecutePrepared");
+	else
+		sprintf(log_funcname, "CMySQLQuery::ExecutePrepared[%s]", Callback.Name.c_str());
+
+	MYSQL_STMT *statement = mysql_stmt_init(mysql_connection);
+	if (statement == NULL)
+	{
+		SetPreparedQueryError(this, log_funcname, mysql_errno(mysql_connection), mysql_error(mysql_connection));
+		if (!Unthreaded)
+			Handle->DecreaseQueryCounter();
+		return false;
+	}
+
+	bool success = false;
+	if (mysql_stmt_prepare(statement, Query.c_str(), static_cast<unsigned long>(Query.length())) != 0)
+	{
+		SetPreparedQueryError(this, log_funcname, mysql_stmt_errno(statement), mysql_stmt_error(statement));
+	}
+	else if (mysql_stmt_param_count(statement) != StatementParameters.size())
+	{
+		CLog::Get()->LogFunction(LOG_ERROR, log_funcname, "expected %d bound parameters, received %d (Prepared query: \"%s\")", static_cast<int>(mysql_stmt_param_count(statement)), static_cast<int>(StatementParameters.size()), Query.c_str());
+		SetPreparedQueryError(this, log_funcname, 2031, "prepared statement parameter count does not match");
+	}
+	else
+	{
+		vector<MYSQL_BIND> bindings(StatementParameters.size());
+		vector<unsigned long> lengths(StatementParameters.size());
+		memset(bindings.empty() ? NULL : &bindings[0], 0, bindings.size() * sizeof(MYSQL_BIND));
+
+		for (size_t index = 0; index < StatementParameters.size(); ++index)
+		{
+			s_StatementParameter &parameter = StatementParameters[index];
+			MYSQL_BIND &binding = bindings[index];
+			switch (parameter.Type)
+			{
+				case s_StatementParameter::TYPE_INTEGER:
+					binding.buffer_type = MYSQL_TYPE_LONG;
+					binding.buffer = &parameter.Integer;
+					break;
+				case s_StatementParameter::TYPE_FLOAT:
+					binding.buffer_type = MYSQL_TYPE_FLOAT;
+					binding.buffer = &parameter.Float;
+					break;
+				case s_StatementParameter::TYPE_STRING:
+					lengths[index] = static_cast<unsigned long>(parameter.String.length());
+					binding.buffer_type = MYSQL_TYPE_STRING;
+					binding.buffer = const_cast<char *>(parameter.String.c_str());
+					binding.buffer_length = lengths[index];
+					binding.length = &lengths[index];
+					break;
+			}
+		}
+
+		if (!bindings.empty() && mysql_stmt_bind_param(statement, &bindings[0]) != 0)
+		{
+			SetPreparedQueryError(this, log_funcname, mysql_stmt_errno(statement), mysql_stmt_error(statement));
+		}
+		else if (mysql_stmt_execute(statement) != 0)
+		{
+			SetPreparedQueryError(this, log_funcname, mysql_stmt_errno(statement), mysql_stmt_error(statement));
+		}
+		else
+		{
+			if (mysql_stmt_field_count(statement) == 0 && (Unthreaded || Callback.Name.length() > 0))
+			{
+				Result = new CMySQLResult;
+				Result->m_WarningCount = mysql_stmt_warning_count(statement);
+				Result->m_AffectedRows = mysql_stmt_affected_rows(statement);
+				Result->m_InsertID = mysql_stmt_insert_id(statement);
+				Result->m_Query = Query;
+				success = true;
+			}
+			else if (mysql_stmt_field_count(statement) != 0 && (Unthreaded || Callback.Name.length() > 0))
+			{
+				success = StorePreparedResult(statement);
+				if (success)
+					Result->m_Query = Query;
+				else
+					SetPreparedQueryError(this, log_funcname, mysql_stmt_errno(statement), mysql_stmt_error(statement));
+			}
+			else
+			{
+				mysql_stmt_free_result(statement);
+				success = true;
+			}
+		}
+	}
+
+	mysql_stmt_close(statement);
+	if (!Unthreaded)
+		Handle->DecreaseQueryCounter();
+	return success;
+}
+
 bool CMySQLQuery::Execute(MYSQL *mysql_connection)
 {
+	if (IsPreparedStatement)
+		return ExecutePrepared(mysql_connection);
+
 	bool ret_val = false;
 	char log_funcname[64];
 	if (Unthreaded)

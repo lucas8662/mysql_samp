@@ -57,6 +57,13 @@ namespace Native
 	AMX_DECLARE_NATIVE(mysql_query);
 	AMX_DECLARE_NATIVE(mysql_tquery_file);
 	AMX_DECLARE_NATIVE(mysql_query_file);
+
+	AMX_DECLARE_NATIVE(mysql_stmt_prepare);
+	AMX_DECLARE_NATIVE(mysql_stmt_bind_int);
+	AMX_DECLARE_NATIVE(mysql_stmt_bind_float);
+	AMX_DECLARE_NATIVE(mysql_stmt_bind_string);
+	AMX_DECLARE_NATIVE(mysql_stmt_execute);
+	AMX_DECLARE_NATIVE(mysql_stmt_close);
 	
 	AMX_DECLARE_NATIVE(mysql_stat);
 	AMX_DECLARE_NATIVE(mysql_set_charset);

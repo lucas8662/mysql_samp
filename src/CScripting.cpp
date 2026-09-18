@@ -14,7 +14,29 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <map>
 #include <vector>
+
+struct CPreparedStatementTemplate
+{
+	unsigned int ConnectionID;
+	string Query;
+	vector<CMySQLQuery::s_StatementParameter> Parameters;
+};
+
+static std::map<unsigned int, CPreparedStatementTemplate> PreparedStatements;
+static unsigned int NextPreparedStatementID = 1;
+
+static void ClearPreparedStatements(unsigned int connectionID)
+{
+	for (std::map<unsigned int, CPreparedStatementTemplate>::iterator it = PreparedStatements.begin(); it != PreparedStatements.end();)
+	{
+		if (it->second.ConnectionID == connectionID)
+			PreparedStatements.erase(it++);
+		else
+			++it;
+	}
+}
 
 static string Trim(const string& value)
 {
@@ -933,6 +955,7 @@ AMX_DECLARE_NATIVE(Native::mysql_close)
 
 	CMySQLHandle *Handle = CMySQLHandle::GetHandle(connection_id);
 	
+	ClearPreparedStatements(connection_id);
 	Handle->Destroy();
 
 	CCallback::Get()->ClearByHandle(Handle);
@@ -1133,6 +1156,130 @@ AMX_DECLARE_NATIVE(Native::mysql_query)
 	delete query.Result;
 
 	return static_cast<cell>(stored_result_id);
+}
+
+//native MySQLStatement:mysql_stmt_prepare(connectionHandle, const query[]);
+AMX_DECLARE_NATIVE(Native::mysql_stmt_prepare)
+{
+	const unsigned int connectionID = params[1];
+	const char *queryText = NULL;
+	amx_StrParam(amx, params[2], queryText);
+	if (!CMySQLHandle::IsValid(connectionID))
+		return ERROR_INVALID_CONNECTION_HANDLE("mysql_stmt_prepare", connectionID);
+	if (queryText == NULL || *queryText == '\0')
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_stmt_prepare", "query must not be empty");
+
+	unsigned int statementID = NextPreparedStatementID++;
+	if (statementID == 0)
+		statementID = NextPreparedStatementID++;
+	CPreparedStatementTemplate statement;
+	statement.ConnectionID = connectionID;
+	statement.Query = queryText;
+	PreparedStatements.insert(std::make_pair(statementID, statement));
+	return static_cast<cell>(statementID);
+}
+
+static CPreparedStatementTemplate *GetPreparedStatement(unsigned int statementID, const char *function)
+{
+	std::map<unsigned int, CPreparedStatementTemplate>::iterator it = PreparedStatements.find(statementID);
+	if (it == PreparedStatements.end())
+	{
+		CLog::Get()->LogFunction(LOG_ERROR, function, "invalid prepared statement handle (id: %d)", statementID);
+		return NULL;
+	}
+	return &it->second;
+}
+
+static bool GetPreparedParameter(CPreparedStatementTemplate *statement, unsigned int parameterID, CMySQLQuery::s_StatementParameter *&parameter, const char *function)
+{
+	if (parameterID > 1023)
+	{
+		CLog::Get()->LogFunction(LOG_ERROR, function, "parameter index must be between 0 and 1023");
+		return false;
+	}
+	if (statement->Parameters.size() <= parameterID)
+		statement->Parameters.resize(parameterID + 1);
+	parameter = &statement->Parameters[parameterID];
+	return true;
+}
+
+//native mysql_stmt_bind_int(MySQLStatement:statement, parameter, value);
+AMX_DECLARE_NATIVE(Native::mysql_stmt_bind_int)
+{
+	CPreparedStatementTemplate *statement = GetPreparedStatement(params[1], "mysql_stmt_bind_int");
+	CMySQLQuery::s_StatementParameter *parameter = NULL;
+	if (statement == NULL || !GetPreparedParameter(statement, params[2], parameter, "mysql_stmt_bind_int"))
+		return 0;
+	parameter->Type = CMySQLQuery::s_StatementParameter::TYPE_INTEGER;
+	parameter->Integer = params[3];
+	parameter->String.clear();
+	return 1;
+}
+
+//native mysql_stmt_bind_float(MySQLStatement:statement, parameter, Float:value);
+AMX_DECLARE_NATIVE(Native::mysql_stmt_bind_float)
+{
+	CPreparedStatementTemplate *statement = GetPreparedStatement(params[1], "mysql_stmt_bind_float");
+	CMySQLQuery::s_StatementParameter *parameter = NULL;
+	if (statement == NULL || !GetPreparedParameter(statement, params[2], parameter, "mysql_stmt_bind_float"))
+		return 0;
+	parameter->Type = CMySQLQuery::s_StatementParameter::TYPE_FLOAT;
+	parameter->Float = amx_ctof(params[3]);
+	parameter->String.clear();
+	return 1;
+}
+
+//native mysql_stmt_bind_string(MySQLStatement:statement, parameter, const value[]);
+AMX_DECLARE_NATIVE(Native::mysql_stmt_bind_string)
+{
+	CPreparedStatementTemplate *statement = GetPreparedStatement(params[1], "mysql_stmt_bind_string");
+	CMySQLQuery::s_StatementParameter *parameter = NULL;
+	if (statement == NULL || !GetPreparedParameter(statement, params[2], parameter, "mysql_stmt_bind_string"))
+		return 0;
+	const char *value = NULL;
+	amx_StrParam(amx, params[3], value);
+	parameter->Type = CMySQLQuery::s_StatementParameter::TYPE_STRING;
+	parameter->String = value != NULL ? value : "";
+	return 1;
+}
+
+//native mysql_stmt_execute(MySQLStatement:statement, callback[] = "", format[] = "", {Float,_}:...);
+AMX_DECLARE_NATIVE(Native::mysql_stmt_execute)
+{
+	static const int ConstParamCount = 3;
+	CPreparedStatementTemplate *statement = GetPreparedStatement(params[1], "mysql_stmt_execute");
+	if (statement == NULL)
+		return 0;
+	if (!CMySQLHandle::IsValid(statement->ConnectionID))
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_stmt_execute", "connection handle is no longer valid");
+
+	const char *callbackName = NULL;
+	const char *callbackFormat = NULL;
+	amx_StrParam(amx, params[2], callbackName);
+	amx_StrParam(amx, params[3], callbackFormat);
+	if (callbackFormat != NULL && strlen(callbackFormat) != ((params[0] / 4) - ConstParamCount))
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_stmt_execute", "callback parameter count does not match format specifier length");
+
+	CMySQLQuery *query = new CMySQLQuery;
+	query->Query = statement->Query;
+	query->StatementParameters = statement->Parameters;
+	query->IsPreparedStatement = true;
+	query->Callback.Name = callbackName != NULL ? callbackName : string();
+	if (callbackFormat != NULL)
+		CCallback::Get()->FillCallbackParams(query->Callback.Params, callbackFormat, amx, params, ConstParamCount);
+	query->Handle = CMySQLHandle::GetHandle(statement->ConnectionID);
+	query->Handle->QueueQuery(query);
+	return 1;
+}
+
+//native mysql_stmt_close(MySQLStatement:statement);
+AMX_DECLARE_NATIVE(Native::mysql_stmt_close)
+{
+	std::map<unsigned int, CPreparedStatementTemplate>::iterator statement = PreparedStatements.find(params[1]);
+	if (statement == PreparedStatements.end())
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_stmt_close", "invalid prepared statement handle (id: %d)", params[1]);
+	PreparedStatements.erase(statement);
+	return 1;
 }
 
 //native mysql_tquery_file(connectionHandle, const file_path[], callback[] = "", format[] = "", {Float,_}:...);

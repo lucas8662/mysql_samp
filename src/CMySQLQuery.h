@@ -5,10 +5,12 @@
 
 #include <string>
 #include <stack>
+#include <vector>
 #include <boost/variant.hpp>
 
 using std::string;
 using std::stack;
+using std::vector;
 
 #include "main.h"
 #include "CMySQLConnection.h"
@@ -23,6 +25,8 @@ class CMySQLQuery
 {
 private:
 	bool StoreResult(MYSQL *mysql_connection, MYSQL_RES *mysql_result);
+	bool ExecutePrepared(MYSQL *mysql_connection);
+	bool StorePreparedResult(MYSQL_STMT *statement);
 
 public:
 	bool Execute(MYSQL *mysql_connection);
@@ -34,6 +38,20 @@ public:
 	CMySQLResult *Result;
 
 	bool Unthreaded;
+
+	// Parameters are copied into the queued query so Pawn memory is never used
+	// from a connector worker thread.
+	struct s_StatementParameter
+	{
+		enum e_Type { TYPE_INTEGER, TYPE_FLOAT, TYPE_STRING };
+		s_StatementParameter() : Type(TYPE_INTEGER), Integer(0), Float(0.0f) {}
+		e_Type Type;
+		int Integer;
+		float Float;
+		string String;
+	};
+	bool IsPreparedStatement;
+	vector<s_StatementParameter> StatementParameters;
 
 	struct s_Callback
 	{
@@ -57,7 +75,8 @@ public:
 		Handle(NULL),
 		Result(NULL),
 
-		Unthreaded(false)
+		Unthreaded(false),
+		IsPreparedStatement(false)
 	{}
 	~CMySQLQuery() {}
 	
