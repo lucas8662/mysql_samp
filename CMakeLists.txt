@@ -36,7 +36,9 @@ add_subdirectory(third_party/mariadb-connector-c)
 # vcpkg exports BoostConfig.cmake.  Config mode avoids CMake 4's removed
 # FindBoost compatibility module and works with the Windows static-md triplet.
 find_package(Boost CONFIG REQUIRED COMPONENTS headers atomic chrono date_time system thread)
-# vcpkg Boost component targets may not export their header directory.
+# Some recent vcpkg Boost component packages do not propagate the header
+# directory through their imported targets. The plugin also uses header-only
+# Boost modules (Spirit, Variant and Lockfree), so make that directory direct.
 find_path(SAMP_BOOST_INCLUDE_DIR boost/variant.hpp REQUIRED)
 
 file(GLOB PLUGIN_SOURCES CONFIGURE_DEPENDS src/*.cpp libs/sdk/*.cpp libs/sdk/amx/*.c)
