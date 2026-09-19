@@ -23,7 +23,7 @@ static string FormatLogMessage(const char *format, va_list arguments)
 	if (size < 0)
 		return "unable to format log message";
 
-	vector<char> buffer(static_cast<size_t>(size) + 1);
+	std::vector<char> buffer(static_cast<size_t>(size) + 1);
 	vsnprintf(&buffer[0], buffer.size(), format, arguments);
 	return string(&buffer[0], static_cast<size_t>(size));
 }
