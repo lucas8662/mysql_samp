@@ -34,7 +34,7 @@ public:
 		return m_MainConnection;
 	}
 	void ExecuteOnConnections(function<void (CMySQLConnection *)> func);
-	void QueueQuery(CMySQLQuery *query, bool use_pool = false);
+	bool QueueQuery(CMySQLQuery *query, bool use_pool = false);
 
 
 	//checks if handle exists by id

@@ -271,8 +271,10 @@ AMX_DECLARE_NATIVE(Native::orm_select)
 		query->Orm.Object = OrmObject;
 		query->Orm.Type = ORM_QUERYTYPE_SELECT;
 	
-		Handle->QueueQuery(query);
-		return 1;
+		if (Handle->QueueQuery(query))
+			return 1;
+		delete query;
+		return 0;
 	}
 	else
 	{
@@ -309,8 +311,10 @@ AMX_DECLARE_NATIVE(Native::orm_update)
 		query->Orm.Object = OrmObject;
 		query->Orm.Type = ORM_QUERYTYPE_UPDATE;
 
-		Handle->QueueQuery(query);
-		return 1;
+		if (Handle->QueueQuery(query))
+			return 1;
+		delete query;
+		return 0;
 	}
 	else
 	{
@@ -360,8 +364,10 @@ AMX_DECLARE_NATIVE(Native::orm_insert)
 		query->Orm.Object = OrmObject;
 		query->Orm.Type = ORM_QUERYTYPE_INSERT;
 
-		Handle->QueueQuery(query);
-		return 1;
+		if (Handle->QueueQuery(query))
+			return 1;
+		delete query;
+		return 0;
 	}
 	else
 	{
@@ -399,7 +405,11 @@ AMX_DECLARE_NATIVE(Native::orm_delete)
 		query->Orm.Object = OrmObject;
 		query->Orm.Type = ORM_QUERYTYPE_DELETE;
 
-		Handle->QueueQuery(query);
+		if (!Handle->QueueQuery(query))
+		{
+			delete query;
+			return 0;
+		}
 
 		if(clear_vars == true)
 			OrmObject->ClearVariableValues();
@@ -455,8 +465,10 @@ AMX_DECLARE_NATIVE(Native::orm_save)
 		query->Handle = Handle;
 		query->Orm.Object = OrmObject;
 
-		Handle->QueueQuery(query);
-		return 1;
+		if (Handle->QueueQuery(query))
+			return 1;
+		delete query;
+		return 0;
 	}
 	else
 	{
@@ -1090,8 +1102,10 @@ AMX_DECLARE_NATIVE(Native::mysql_pquery)
 
 	query->Handle = Handle;
 	
-	Handle->QueueQuery(query, true);
-	return 1;
+	if (Handle->QueueQuery(query, true))
+		return 1;
+	delete query;
+	return 0;
 }
 
 //native mysql_tquery(conhandle, query[], callback[], format[], {Float,_}:...);
@@ -1133,8 +1147,10 @@ AMX_DECLARE_NATIVE(Native::mysql_tquery)
 
 	query->Handle = Handle;
 	
-	Handle->QueueQuery(query);
-	return 1;
+	if (Handle->QueueQuery(query))
+		return 1;
+	delete query;
+	return 0;
 }
 
 
@@ -1418,7 +1434,11 @@ AMX_DECLARE_NATIVE(Native::mysql_tquery_file)
 			if (callbackFormat != NULL)
 				CCallback::Get()->FillCallbackParams(query->Callback.Params, callbackFormat, amx, params, ConstParamCount);
 		}
-		handle->QueueQuery(query);
+		if (!handle->QueueQuery(query))
+		{
+			delete query;
+			return 0;
+		}
 	}
 
 	CLog::Get()->LogFunction(LOG_DEBUG, "mysql_tquery_file", "queued %d queries from %s", static_cast<int>(queries.size()), path.c_str());

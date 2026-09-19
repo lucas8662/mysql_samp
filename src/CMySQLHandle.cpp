@@ -121,21 +121,29 @@ void CMySQLHandle::ExecuteOnConnections(function<void (CMySQLConnection *)> func
 		func(*c);
 }
 
-void CMySQLHandle::QueueQuery(CMySQLQuery *query, bool use_pool /*= false*/)
+bool CMySQLHandle::QueueQuery(CMySQLQuery *query, bool use_pool /*= false*/)
 {
 	if(use_pool == false)
 	{
-		m_ThreadConnection->QueueQuery(query);
-		m_QueryCounter++;
+		if (m_ThreadConnection != NULL && m_ThreadConnection->QueueQuery(query))
+		{
+			m_QueryCounter++;
+			return true;
+		}
 	}
 	else if(use_pool == true && m_ConnectionPool.size() > 0)
 	{
-		(*m_CurrentConPoolPos++)->QueueQuery(query);
-		m_QueryCounter++;
-
+		CMySQLConnection *connection = *m_CurrentConPoolPos++;
 		if(m_CurrentConPoolPos == m_ConnectionPool.end())
 			m_CurrentConPoolPos = m_ConnectionPool.begin();
+		if (connection->QueueQuery(query))
+		{
+			m_QueryCounter++;
+			return true;
+		}
 	}
+	CLog::Get()->LogFunction(LOG_ERROR, "CMySQLHandle::QueueQuery", "query queue is full");
+	return false;
 }
 
 unsigned int CMySQLHandle::SaveActiveResult() 

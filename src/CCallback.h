@@ -52,9 +52,9 @@ public:
 	void FillCallbackParams(stack< boost::variant<cell, string> > &dest, const char *format, AMX* amx, cell* params, const int ConstParamCount);
 
 
-	inline void QueueQuery(CMySQLQuery *query)
+	inline bool QueueQuery(CMySQLQuery *query)
 	{
-		m_CallbackQueue.push(query);
+		return m_CallbackQueue.push(query);
 	}
 
 	inline void AddAmx(AMX *amx)

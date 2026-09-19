@@ -60,9 +60,9 @@ public:
 		return m_Connection;
 	}
 
-	inline void QueueQuery(CMySQLQuery *query)
+	inline bool QueueQuery(CMySQLQuery *query)
 	{
-		m_QueryQueue.push(query);
+		return m_QueryQueue.push(query);
 	}
 
 	inline bool operator==(CMySQLConnection &rhs)

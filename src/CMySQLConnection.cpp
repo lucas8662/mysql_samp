@@ -227,7 +227,11 @@ void CMySQLConnection::ProcessQueries()
 						Connect();
 					}
 				}
-				CCallback::Get()->QueueQuery(query);
+				if (!CCallback::Get()->QueueQuery(query))
+				{
+					CLog::Get()->LogFunction(LOG_ERROR, "CMySQLConnection::ProcessQueries", "callback queue is full");
+					delete query;
+				}
 			}
 		}
 
