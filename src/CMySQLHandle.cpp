@@ -4,6 +4,7 @@
 #include "CLog.h"
 
 
+#include <boost/bind/bind.hpp>
 #include <boost/chrono.hpp>
 namespace chrono = boost::chrono;
 
@@ -32,7 +33,7 @@ CMySQLHandle::~CMySQLHandle()
 	for (unordered_map<unsigned int, CMySQLResult*>::iterator it = m_SavedResults.begin(), end = m_SavedResults.end(); it != end; it++)
 		delete it->second;
 	
-	ExecuteOnConnections(boost::bind(&CMySQLConnection::Destroy, _1));
+	ExecuteOnConnections(boost::bind(&CMySQLConnection::Destroy, boost::placeholders::_1));
 
 	CLog::Get()->LogFunction(LOG_DEBUG, "CMySQLHandle::~CMySQLHandle", "deconstructor called");
 }

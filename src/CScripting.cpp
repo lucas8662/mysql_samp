@@ -11,6 +11,7 @@
 
 #include "misc.h"
 
+#include <boost/bind/bind.hpp>
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -154,9 +155,9 @@ static bool ParseQueriesFromFile(const string& path, vector<string>& queries)
 	{
 		const size_t lineComment = line.find("-- ");
 		const size_t hashComment = line.find('#');
-		const size_t comment = std::min(lineComment, hashComment);
-		if (comment != string::npos)
-			line.erase(comment);
+		const size_t commentPosition = std::min(lineComment, hashComment);
+		if (commentPosition != string::npos)
+			line.erase(commentPosition);
 		line.push_back(' ');
 		size_t separator = 0;
 		while ((separator = line.find(';')) != string::npos)
@@ -902,7 +903,7 @@ AMX_DECLARE_NATIVE(Native::mysql_connect)
 	
 
 	CMySQLHandle *Handle = CMySQLHandle::Create(host, user, pass != NULL ? pass : "", db, port, pool_size, auto_reconnect);
-	Handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Connect, _1));
+	Handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Connect, boost::placeholders::_1));
 
 	return static_cast<cell>(Handle->GetID());
 }
@@ -937,7 +938,7 @@ AMX_DECLARE_NATIVE(Native::mysql_connect_ssl)
 	const bool autoReconnect = params[11] != 0;
 	const size_t poolSize = params[12];
 	CMySQLHandle *handle = CMySQLHandle::Create(host, user, password != NULL ? password : "", database, port, poolSize, autoReconnect, tls);
-	handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Connect, _1));
+	handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Connect, boost::placeholders::_1));
 	return static_cast<cell>(handle->GetID());
 }
 
@@ -959,7 +960,7 @@ AMX_DECLARE_NATIVE(Native::mysql_connect_file)
 		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_connect_file", "%s (%s)", error.c_str(), name.c_str());
 
 	CMySQLHandle *handle = CMySQLHandle::Create(host, user, password, database, port, poolSize, autoReconnect, tls);
-	handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Connect, _1));
+	handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Connect, boost::placeholders::_1));
 	return static_cast<cell>(handle->GetID());
 }
 
@@ -995,8 +996,8 @@ AMX_DECLARE_NATIVE(Native::mysql_reconnect)
 
 	CMySQLHandle *Handle = CMySQLHandle::GetHandle(connection_id);
 
-	Handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Disconnect, _1));
-	Handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Connect, _1));
+	Handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Disconnect, boost::placeholders::_1));
+	Handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Connect, boost::placeholders::_1));
 	return 1;
 }
 
@@ -1766,7 +1767,7 @@ AMX_DECLARE_NATIVE(Native::mysql_set_charset)
 		return ERROR_INVALID_CONNECTION_HANDLE("mysql_set_charset", connection_id);
 
 
-	CMySQLHandle::GetHandle(connection_id)->ExecuteOnConnections(boost::bind(&CMySQLConnection::SetCharset, _1, string(charset)));
+	CMySQLHandle::GetHandle(connection_id)->ExecuteOnConnections(boost::bind(&CMySQLConnection::SetCharset, boost::placeholders::_1, string(charset)));
 	return 1;
 }
 
