@@ -1,257 +1,217 @@
-#pragma once
-
 #include <cstdio>
-#include <stdarg.h>
+#include <cstdarg>
+#include <ctime>
+#include <vector>
 
-#include <string>
 #include <boost/chrono.hpp>
-
-using std::string;
-namespace chrono = boost::chrono;
 
 #include "CLog.h"
 
+namespace chrono = boost::chrono;
 
 CLog *CLog::m_Instance = NULL;
 
-
-void CLog::ProcessLog() 
+static string FormatLogMessage(const char *format, va_list arguments)
 {
-	bool 
-		IsCallbackActive = false,
-		IsCallbackUsed = false;
-	string CallbackMsg;
-	
-	FILE *LogFile = fopen(m_LogFileName, "w");
+	if (format == NULL)
+		return string();
 
-	char StartLogTime[32];
-	time_t StartLogTimeRaw;
-	time(&StartLogTimeRaw);
-	const tm * StartLogTimeInfo = localtime(&StartLogTimeRaw);
-	strftime(StartLogTime, sizeof(StartLogTime), "%H:%M, %d.%m.%Y", StartLogTimeInfo);
+	va_list copy;
+	va_copy(copy, arguments);
+	const int size = vsnprintf(NULL, 0, format, copy);
+	va_end(copy);
+	if (size < 0)
+		return "unable to format log message";
 
-	fprintf(LogFile, "<html><head><title>MySQL Plugin log</title><style>table {border: 1px solid black; border-collapse: collapse; line-height: 23px; table-layout: fixed; width: 863px;}th, td {border: 1px solid black; word-wrap: break-word;}thead {background-color: #C0C0C0;}		tbody {text-align: center;}		table.left1 {position: relative; left: 36px;}		table.left2 {position: relative; left: 72px;}		.time {width: 80px;}		.func {width: 200px;}		.stat {width: 75px;}		.msg {width: 400px;}	</style>	<script>		var 			LOG_ERROR = 1,			LOG_WARNING = 2,			LOG_DEBUG = 4;				var			FirstRun = true,			IsCallbackActive = false,			IsTableOpen = false,			IsThreadActive = false;				function StartCB(cbname) {			StartTable(1, 0, cbname);		}		function EndCB() {			EndTable();			IsCallbackActive = false;		}		function StartTable(iscallback, isthreaded, cbname) {			if(IsTableOpen == true || isthreaded != IsThreadActive)				EndTable();						if(iscallback == true) {				document.write(					\"<table class=left2>\" +						\"<th bgcolor=#C0C0C0 >In callback \\\"\"+cbname+\"\\\"</th>\" +					\"</table>\"				);			}						document.write(\"<table\");			if(iscallback == true || (isthreaded != IsThreadActive && isthreaded == false && IsCallbackActive == true) ) {				document.write(\" class=left2\");				IsCallbackActive = true;			}			else if(isthreaded == true) 				document.write(\" class=left1\");						IsThreadActive = isthreaded;			document.write(\">\");						if(FirstRun == true) {				FirstRun = false;				document.write(\"<thead><th class=time>Time</th><th class=func>Function</th><th class=stat>Status</th><th class=msg>Message</th></thead>\");			}			document.write(\"<tbody>\");			IsTableOpen = true;		}				function EndTable() {			document.write(\"</tbody></table>\");			IsTableOpen = false;		}						function Log(time, func, status, msg, isthreaded) {			isthreaded = typeof isthreaded !== 'undefined' ? isthreaded : 0;			if(IsTableOpen == false || isthreaded != IsThreadActive)				StartTable(false, isthreaded, \"\");			var StatColor, StatText;			switch(status) {			case LOG_ERROR:				StatColor = \"RED\";				StatText = \"ERROR\";				break;			case LOG_WARNING:				StatColor = \"#FF9900\";				StatText = \"WARNING\";				break;			case LOG_DEBUG:				StatColor = \"#00DD00\";				StatText = \"OK\";				break;			}			document.write(				\"<tr bgcolor=\"+StatColor+\">\" + 					\"<td class=time>\"+time+\"</td>\" + 					\"<td class=func>\"+func+\"</td>\" + 					\"<td class=stat>\"+StatText+\"</td>\" + 					\"<td class=msg>\"+msg+\"</td>\" + 				\"</tr>\"			);		}	</script></head><body bgcolor=grey>	<h2>Logging started at %s</h2><script>\n", StartLogTime);
-	fflush(LogFile);
-
-	while(m_LogThreadAlive) 
-	{
-		m_SLogData *LogData = NULL;
-		while(m_LogQueue.pop(LogData)) 
-		{
-			if(LogData->Info == LOG_INFO_CALLBACK_BEGIN)
-			{
-				IsCallbackActive = true;
-				IsCallbackUsed = false;
-				CallbackMsg = LogData->Msg;
-			}
-			else if(LogData->Info == LOG_INFO_CALLBACK_END)
-			{
-				if(IsCallbackUsed == true)
-					fputs("EndCB();", LogFile);
-				IsCallbackActive = false;
-				IsCallbackUsed = false;
-			}
-			else 
-			{
-				if(IsCallbackActive == true && IsCallbackUsed == false)
-				{
-					fputs(CallbackMsg.c_str(), LogFile);
-					IsCallbackUsed = true;
-				}
-				
-				char timeform[16];
-				time_t rawtime;
-				time(&rawtime);
-				strftime(timeform, sizeof(timeform), "%X", localtime(&rawtime));
-
-				//escape "'s in Msg
-				string LogMsg(LogData->Msg);
-				for(size_t s = 0; s < LogMsg.length(); ++s) 
-				{
-					char Char = LogMsg.at(s);
-					if(Char == '\\')
-						LogMsg.replace(s, 1, "\\\\"), s++;
-					else if(Char == '"')
-						LogMsg.replace(s, 1, "\\\""), s++;
-					
-				}
-
-				fprintf(LogFile, "Log(\"%s\",\"%s\",%d,\"%s\",%d);\n", timeform, LogData->Name, LogData->Status, LogMsg.c_str(), LogData->Info == LOG_INFO_THREADED ? 1 : 0);//LogData->IsThreaded == false ? 0 : 1);
-			}
-			fputs("</script>", LogFile); //append this tag, or else the JS functions won't work
-			fflush(LogFile);
-			fseek(LogFile, ftell(LogFile)-9, SEEK_SET); //set position before </script>-tag to overwrite it next time
-
-			delete LogData;
-		}
-		this_thread::sleep_for(chrono::milliseconds(10));
-		
-	}
-	fputs("</script></body></html>", LogFile);
-	fclose(LogFile);
+	vector<char> buffer(static_cast<size_t>(size) + 1);
+	vsnprintf(&buffer[0], buffer.size(), format, arguments);
+	return string(&buffer[0], static_cast<size_t>(size));
 }
 
-void CLog::Initialize(const char *logfile) 
+static string EscapeJavaScriptString(const string& value)
 {
-	strcpy(m_LogFileName, logfile);
+	string escaped;
+	escaped.reserve(value.size());
+	for (size_t index = 0; index < value.size(); ++index)
+	{
+		switch (value[index])
+		{
+			case '\\': escaped.append("\\\\"); break;
+			case '"': escaped.append("\\\""); break;
+			case '\n': escaped.append("\\n"); break;
+			case '\r': escaped.append("\\r"); break;
+			case '\t': escaped.append("\\t"); break;
+			case '<': escaped.append("\\x3C"); break;
+			case '>': escaped.append("\\x3E"); break;
+			case '&': escaped.append("\\x26"); break;
+			default: escaped.push_back(value[index]); break;
+		}
+	}
+	return escaped;
+}
+
+static const char *LogLevelName(unsigned int level)
+{
+	switch (level)
+	{
+		case LOG_ERROR: return "ERROR";
+		case LOG_WARNING: return "WARNING";
+		case LOG_DEBUG: return "DEBUG";
+		default: return "LOG";
+	}
+}
+
+void CLog::ProcessLog()
+{
+	FILE *logFile = fopen(m_LogFileName.c_str(), "w");
+	if (logFile == NULL)
+		return;
+
+	char startTime[32];
+	time_t rawTime;
+	time(&rawTime);
+	strftime(startTime, sizeof(startTime), "%H:%M, %d.%m.%Y", localtime(&rawTime));
+	fprintf(logFile,
+		"<!doctype html><html><head><meta charset=\"utf-8\"><title>MySQL Plugin log</title>"
+		"<style>body{font-family:Arial;background:#ddd}table{border-collapse:collapse;width:100%%}th,td{border:1px solid #333;padding:4px;word-break:break-word}.ERROR{background:#f99}.WARNING{background:#fc9}.DEBUG{background:#9f9}</style>"
+		"<script>function Log(t,f,s,m){var r=document.createElement('tr');r.className=s;[t,f,s,m].forEach(function(v){var c=document.createElement('td');c.textContent=v;r.appendChild(c);});document.getElementById('log').appendChild(r);}function StartCB(n){var r=document.createElement('tr'),c=document.createElement('td');c.colSpan=4;c.textContent='Callback: '+n;r.appendChild(c);document.getElementById('log').appendChild(r);}</script>"
+		"</head><body><h2>Logging started at %s</h2><table><thead><tr><th>Time</th><th>Function</th><th>Status</th><th>Message</th></tr></thead><tbody id=\"log\"></tbody></table>\n",
+		startTime);
+	fflush(logFile);
+
+	while (m_LogThreadAlive)
+	{
+		m_SLogData *logData = NULL;
+		while (m_LogQueue.pop(logData))
+		{
+			if (logData->Info == LOG_INFO_CALLBACK_BEGIN)
+			{
+				const string callback = EscapeJavaScriptString(logData->Msg);
+				fprintf(logFile, "<script>StartCB(\"%s\");</script>\n", callback.c_str());
+			}
+			else if (logData->Info != LOG_INFO_CALLBACK_END)
+			{
+				char timeform[16];
+				time_t now;
+				time(&now);
+				strftime(timeform, sizeof(timeform), "%X", localtime(&now));
+				const string functionName = EscapeJavaScriptString(logData->Name);
+				const string message = EscapeJavaScriptString(logData->Msg);
+				fprintf(logFile, "<script>Log(\"%s\",\"%s\",\"%s\",\"%s\");</script>\n",
+					timeform, functionName.c_str(), LogLevelName(logData->Status), message.c_str());
+			}
+			delete logData;
+		}
+		fflush(logFile);
+		this_thread::sleep_for(chrono::milliseconds(10));
+	}
+
+	fputs("</body></html>\n", logFile);
+	fclose(logFile);
+}
+
+void CLog::Initialize(const char *logfile)
+{
+	m_LogFileName = logfile != NULL && *logfile != '\0' ? logfile : "mysql_log.txt";
 	SetLogType(m_LogType);
 	m_MainThreadID = this_thread::get_id();
 }
 
-void CLog::SetLogType(unsigned int logtype)  
+void CLog::SetLogType(unsigned int logtype)
 {
-	if(logtype != LOG_TYPE_HTML && logtype != LOG_TYPE_TEXT)
-		return ;
-	if(logtype == m_LogType)
-		return ;
+	if (logtype != LOG_TYPE_HTML && logtype != LOG_TYPE_TEXT)
+		return;
+	if (logtype == m_LogType)
+		return;
 
 	m_LogType = logtype;
+	const size_t extension = m_LogFileName.find_last_of('.');
+	const string baseName = extension == string::npos ? m_LogFileName : m_LogFileName.substr(0, extension);
+	m_LogFileName = baseName + (logtype == LOG_TYPE_HTML ? ".html" : ".txt");
 
-	string filename(m_LogFileName);
-	int Pos = filename.find_first_of(".");
-	filename.erase(Pos, filename.size() - Pos);
-
-	if(logtype == LOG_TYPE_HTML) 
-	{
-		if(m_LogThread == NULL)
-			m_LogThread = new thread(&CLog::ProcessLog, this);
-
-		filename.append(".html");
-	}
-	else if(logtype == LOG_TYPE_TEXT) 
-		filename.append(".txt");
-
-	strcpy(m_LogFileName, filename.c_str());
+	if (logtype == LOG_TYPE_HTML && m_LogThread == NULL)
+		m_LogThread = new thread(&CLog::ProcessLog, this);
 }
 
-
-int CLog::LogFunction(unsigned int loglevel, char *funcname, char *msg, ...) 
+int CLog::LogFunction(unsigned int loglevel, const char *funcname, const char *msg, ...)
 {
-	if(m_LogLevel != LOG_NONE)
+	if (m_LogLevel == LOG_NONE || !(m_LogLevel & loglevel))
+		return 0;
+
+	va_list arguments;
+	va_start(arguments, msg);
+	const string formatted = FormatLogMessage(msg, arguments);
+	va_end(arguments);
+	const string functionName = funcname != NULL ? funcname : "unknown";
+
+	if (m_LogType == LOG_TYPE_HTML)
 	{
-		switch(m_LogType) 
-		{
-			case LOG_TYPE_HTML: 
-			{
-				if (m_LogLevel & loglevel) 
-				{
-					m_SLogData *log_data = new m_SLogData;
-
-					log_data->Info = (this_thread::get_id() != m_MainThreadID) ? LOG_INFO_THREADED : LOG_INFO_NONE;
-					log_data->Status = loglevel;
-
-					log_data->Msg = (char *)malloc(2048 * sizeof(char));
-					va_list args;
-					va_start(args, msg);
-					vsprintf(log_data->Msg, msg, args);
-					va_end (args);
-
-					log_data->Name = (char *)malloc((strlen(funcname)+1) * sizeof(char));
-					strcpy(log_data->Name, funcname);
-
-					m_LogQueue.push(log_data);
-				}
-			} 
-			break;
-			case LOG_TYPE_TEXT: 
-			{
-				char msg_buf[2048];
-
-				va_list args;
-				va_start(args, msg);
-				const int real_msg_len = vsprintf(msg_buf, msg, args);
-				va_end (args);
-			
-				char *log_text = (char *)malloc((strlen(funcname) + real_msg_len + 8) * sizeof(char));
-				sprintf(log_text, "%s - %s", funcname, msg_buf);
-				LogText(loglevel, log_text);
-				free(log_text);
-			} 
-			break;
-		}
+		m_SLogData *logData = new m_SLogData;
+		logData->Info = this_thread::get_id() != m_MainThreadID ? LOG_INFO_THREADED : LOG_INFO_NONE;
+		logData->Status = loglevel;
+		logData->Name = functionName;
+		logData->Msg = formatted;
+		if (!m_LogQueue.push(logData))
+			delete logData;
+	}
+	else
+	{
+		const string text = functionName + " - " + formatted;
+		LogText(loglevel, text.c_str());
 	}
 	return 0;
 }
 
-int CLog::LogText(unsigned int loglevel, char* text) 
+int CLog::LogText(unsigned int loglevel, const char *text)
 {
-	if (m_LogLevel & loglevel) 
-	{
-		char prefix[16];
-		switch(loglevel) {
-			case LOG_ERROR:
-				sprintf(prefix, "ERROR");
-				break;
-			case LOG_WARNING:
-				sprintf(prefix, "WARNING");
-				break;
-			case LOG_DEBUG:
-				sprintf(prefix, "DEBUG");
-				break;
-		}
-		char timeform[64];
-		time_t rawtime;
-		time(&rawtime);
-		struct tm * timeinfo;
-		timeinfo = localtime(&rawtime);
-		strftime(timeform, sizeof(timeform), "%X %x", timeinfo);
+	if (!(m_LogLevel & loglevel))
+		return 0;
 
-		FILE *log_file = fopen(m_LogFileName, "a");
-		if(log_file != NULL) 
-		{
-			fprintf(log_file, "[%s] [%s] %s\n", timeform, prefix, text);
-			fclose(log_file);
-		}
-				
+	char timeform[64];
+	time_t rawtime;
+	time(&rawtime);
+	strftime(timeform, sizeof(timeform), "%X %x", localtime(&rawtime));
+	FILE *logFile = fopen(m_LogFileName.c_str(), "a");
+	if (logFile != NULL)
+	{
+		fprintf(logFile, "[%s] [%s] %s\n", timeform, LogLevelName(loglevel), text != NULL ? text : "");
+		fclose(logFile);
 	}
 	return 0;
 }
 
-void CLog::StartCallback(const char *cbname) 
+void CLog::StartCallback(const char *cbname)
 {
-	if(m_LogLevel == LOG_NONE)
-		return ;
-	if(m_LogType == LOG_TYPE_HTML) 
-	{
-		m_SLogData *log_data = new m_SLogData;
-
-		log_data->Info = LOG_INFO_CALLBACK_BEGIN;
-		log_data->Msg = (char *)malloc((strlen(cbname)+20) * sizeof(char));
-		sprintf(log_data->Msg, "StartCB(\"%s\");", cbname);
-
-		m_LogQueue.push(log_data);
-	}
-	else if(m_LogType == LOG_TYPE_TEXT) 
-	{
-		char log_text[64];
-		sprintf(log_text, "Calling callback \"%s\"..", cbname);
-		LogText(LOG_DEBUG, log_text);
-	}
+	if (m_LogLevel == LOG_NONE || m_LogType != LOG_TYPE_HTML)
+		return;
+	m_SLogData *logData = new m_SLogData;
+	logData->Info = LOG_INFO_CALLBACK_BEGIN;
+	logData->Msg = cbname != NULL ? cbname : "";
+	if (!m_LogQueue.push(logData))
+		delete logData;
 }
 
-void CLog::EndCallback() 
+void CLog::EndCallback()
 {
-	if(m_LogType != LOG_TYPE_HTML)
-		return ;
-
-	if(m_LogLevel == LOG_NONE)
-		return ;
-	
-	m_SLogData *log_data = new m_SLogData;
-	log_data->Info = LOG_INFO_CALLBACK_END;
-	m_LogQueue.push(log_data);
+	if (m_LogLevel == LOG_NONE || m_LogType != LOG_TYPE_HTML)
+		return;
+	m_SLogData *logData = new m_SLogData;
+	logData->Info = LOG_INFO_CALLBACK_END;
+	if (!m_LogQueue.push(logData))
+		delete logData;
 }
 
-
-CLog::~CLog() 
+CLog::~CLog()
 {
-	if(m_LogThread != NULL) 
+	if (m_LogThread != NULL)
 	{
 		m_LogThreadAlive = false;
-
 		m_LogThread->join();
 		delete m_LogThread;
+		m_LogThread = NULL;
 	}
+
+	m_SLogData *logData = NULL;
+	while (m_LogQueue.pop(logData))
+		delete logData;
 }
-
-

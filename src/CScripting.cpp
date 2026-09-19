@@ -155,7 +155,7 @@ static bool ParseQueriesFromFile(const string& path, vector<string>& queries)
 	{
 		const size_t lineComment = line.find("-- ");
 		const size_t hashComment = line.find('#');
-		const size_t commentPosition = std::min(lineComment, hashComment);
+		const size_t commentPosition = (std::min)(lineComment, hashComment);
 		if (commentPosition != string::npos)
 			line.erase(commentPosition);
 		line.push_back(' ');
