@@ -1304,8 +1304,10 @@ AMX_DECLARE_NATIVE(Native::mysql_stmt_execute)
 	if (callbackFormat != NULL)
 		CCallback::Get()->FillCallbackParams(query->Callback.Params, callbackFormat, amx, params, ConstParamCount);
 	query->Handle = CMySQLHandle::GetHandle(statement->ConnectionID);
-	query->Handle->QueueQuery(query);
-	return 1;
+	if (query->Handle->QueueQuery(query))
+		return 1;
+	delete query;
+	return 0;
 }
 
 //native mysql_stmt_close(MySQLStatement:statement);
@@ -1385,9 +1387,13 @@ AMX_DECLARE_NATIVE(Native::mysql_transaction_commit)
 	if (callbackFormat != NULL)
 		CCallback::Get()->FillCallbackParams(query->Callback.Params, callbackFormat, amx, params, ConstParamCount);
 	query->Handle = CMySQLHandle::GetHandle(it->second.ConnectionID);
-	Transactions.erase(it);
-	query->Handle->QueueQuery(query);
-	return 1;
+	if (query->Handle->QueueQuery(query))
+	{
+		Transactions.erase(it);
+		return 1;
+	}
+	delete query;
+	return 0;
 }
 
 //native mysql_transaction_rollback(MySQLTransaction:transaction);

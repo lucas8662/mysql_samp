@@ -12,6 +12,12 @@
 
 CCallback *CCallback::m_Instance = new CCallback;
 
+CCallback::~CCallback()
+{
+	CMySQLQuery *query = NULL;
+	while (m_CallbackQueue.pop(query))
+		delete query;
+}
 
 void CCallback::ProcessCallbacks() 
 {
@@ -138,7 +144,6 @@ void CCallback::ClearByHandle(CMySQLHandle *handle)
 			tmp_queue.push(query);
 		else
 		{
-			delete query->Result;
 			delete query;
 		}
 	}

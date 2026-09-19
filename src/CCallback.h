@@ -35,7 +35,7 @@ private:
 	set<AMX *> m_AmxList;
 
 	CCallback() { }
-	~CCallback() { }
+	~CCallback();
 
 public:
 	static inline CCallback *Get()
