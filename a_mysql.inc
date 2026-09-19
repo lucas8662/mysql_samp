@@ -138,6 +138,12 @@ native mysql_stmt_bind_string(MySQLStatement:statement, parameter, const value[]
 native mysql_stmt_execute(MySQLStatement:statement, callback[] = "", format[] = "", {Float,_}:...);
 native mysql_stmt_close(MySQLStatement:statement);
 
+// Transactions are queued as one atomic task on the connection thread.
+native MySQLTransaction:mysql_transaction_begin(connectionHandle = 1);
+native mysql_transaction_query(MySQLTransaction:transaction, const query[]);
+native mysql_transaction_commit(MySQLTransaction:transaction, callback[] = "", format[] = "", {Float,_}:...);
+native mysql_transaction_rollback(MySQLTransaction:transaction);
+
 native mysql_stat(destination[], connectionHandle = 1, max_len = sizeof(destination));
 native mysql_get_charset(destination[], connectionHandle = 1, max_len = sizeof(destination));
 native mysql_set_charset(charset[], connectionHandle = 1);

@@ -106,6 +106,11 @@ extern "C" const AMX_NATIVE_INFO native_list[] =
 	AMX_DEFINE_NATIVE(mysql_stmt_bind_string)
 	AMX_DEFINE_NATIVE(mysql_stmt_execute)
 	AMX_DEFINE_NATIVE(mysql_stmt_close)
+
+	AMX_DEFINE_NATIVE(mysql_transaction_begin)
+	AMX_DEFINE_NATIVE(mysql_transaction_query)
+	AMX_DEFINE_NATIVE(mysql_transaction_commit)
+	AMX_DEFINE_NATIVE(mysql_transaction_rollback)
 	 
 	AMX_DEFINE_NATIVE(mysql_stat)
 	AMX_DEFINE_NATIVE(mysql_get_charset)

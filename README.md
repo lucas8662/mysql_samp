@@ -182,3 +182,23 @@ public OnAccountSaved(playerid)
 ```
 
 Os índices dos parâmetros começam em `0`. A API atende `INSERT`, `UPDATE`, `DELETE` e `SELECT`. Em callbacks, os resultados de `SELECT` ficam disponíveis pelas natives de cache R39; consultas de alteração expõem `cache_affected_rows` e `cache_insert_id`.
+
+
+## Transactions
+
+Use transactions when two or more writes must either all be applied or all be reverted. The plugin executes the queued queries consecutively on one connection, beginning with `START TRANSACTION` and finalizing with `COMMIT`. If one query fails, it runs `ROLLBACK` and calls `OnQueryError`.
+
+```pawn
+new MySQLTransaction:transaction = mysql_transaction_begin(1);
+mysql_transaction_query(transaction, "UPDATE accounts SET money = money - 100 WHERE id = 1");
+mysql_transaction_query(transaction, "UPDATE accounts SET money = money + 100 WHERE id = 2");
+mysql_transaction_commit(transaction, "OnTransferComplete", "d", playerid);
+
+forward OnTransferComplete(playerid);
+public OnTransferComplete(playerid)
+{
+    printf("Transferência concluída: %d linhas afetadas", cache_affected_rows());
+}
+```
+
+Call `mysql_transaction_rollback` before `mysql_transaction_commit` to discard a transaction that has not been sent to the database.

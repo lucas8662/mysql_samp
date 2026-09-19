@@ -26,6 +26,7 @@ class CMySQLQuery
 private:
 	bool StoreResult(MYSQL *mysql_connection, MYSQL_RES *mysql_result);
 	bool ExecutePrepared(MYSQL *mysql_connection);
+	bool ExecuteTransaction(MYSQL *mysql_connection);
 	bool StorePreparedResult(MYSQL_STMT *statement);
 
 public:
@@ -53,6 +54,9 @@ public:
 	bool IsPreparedStatement;
 	vector<s_StatementParameter> StatementParameters;
 
+	bool IsTransaction;
+	vector<string> TransactionQueries;
+
 	struct s_Callback
 	{
 		stack< boost::variant<cell, string> > Params;
@@ -76,7 +80,8 @@ public:
 		Result(NULL),
 
 		Unthreaded(false),
-		IsPreparedStatement(false)
+		IsPreparedStatement(false),
+		IsTransaction(false)
 	{}
 	~CMySQLQuery() {}
 	

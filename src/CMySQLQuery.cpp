@@ -156,6 +156,98 @@ bool CMySQLQuery::StorePreparedResult(MYSQL_STMT *statement)
 	return true;
 }
 
+static void SetTransactionQueryError(CMySQLQuery *query, char *log_funcname, unsigned int error_id, const char *error_str, const string &failed_query)
+{
+	CLog::Get()->LogFunction(LOG_ERROR, log_funcname, "(error #%d) %s (Transaction query: \"%s\")", error_id, error_str, failed_query.c_str());
+	if (!query->Unthreaded)
+	{
+		query->Orm.Object = NULL;
+		query->Orm.Type = 0;
+		while (!query->Callback.Params.empty())
+			query->Callback.Params.pop();
+		query->Callback.Params.push(static_cast<cell>(error_id));
+		query->Callback.Params.push(string(error_str));
+		query->Callback.Params.push(query->Callback.Name);
+		query->Callback.Params.push(failed_query);
+		query->Callback.Params.push(static_cast<cell>(query->Handle->GetID()));
+		query->Callback.Name = "OnQueryError";
+	}
+}
+
+bool CMySQLQuery::ExecuteTransaction(MYSQL *mysql_connection)
+{
+	char log_funcname[64];
+	if (Unthreaded)
+		sprintf(log_funcname, "CMySQLQuery::ExecuteTransaction");
+	else
+		sprintf(log_funcname, "CMySQLQuery::ExecuteTransaction[%s]", Callback.Name.c_str());
+
+	bool success = false;
+	string failed_query("START TRANSACTION");
+	my_ulonglong affected_rows = 0;
+	my_ulonglong insert_id = 0;
+	if (TransactionQueries.empty())
+	{
+		SetTransactionQueryError(this, log_funcname, 1064, "transaction has no queries", failed_query);
+	}
+	else if (mysql_real_query(mysql_connection, failed_query.c_str(), failed_query.length()) != 0)
+	{
+		SetTransactionQueryError(this, log_funcname, mysql_errno(mysql_connection), mysql_error(mysql_connection), failed_query);
+	}
+	else
+	{
+		success = true;
+		for (size_t index = 0; index < TransactionQueries.size(); ++index)
+		{
+			failed_query = TransactionQueries[index];
+			if (mysql_real_query(mysql_connection, failed_query.c_str(), failed_query.length()) != 0)
+			{
+				success = false;
+				break;
+			}
+			affected_rows += mysql_affected_rows(mysql_connection);
+			const my_ulonglong current_insert_id = mysql_insert_id(mysql_connection);
+			if (current_insert_id != 0)
+				insert_id = current_insert_id;
+			MYSQL_RES *result = mysql_store_result(mysql_connection);
+			if (result != NULL)
+				mysql_free_result(result);
+			while (mysql_next_result(mysql_connection) == 0)
+			{
+				result = mysql_store_result(mysql_connection);
+				if (result != NULL)
+					mysql_free_result(result);
+			}
+		}
+
+		if (success)
+		{
+			failed_query = "COMMIT";
+			if (mysql_real_query(mysql_connection, failed_query.c_str(), failed_query.length()) != 0)
+				success = false;
+		}
+		if (!success)
+		{
+			const unsigned int error_id = mysql_errno(mysql_connection);
+			const string error_str(mysql_error(mysql_connection));
+			mysql_real_query(mysql_connection, "ROLLBACK", 8);
+			SetTransactionQueryError(this, log_funcname, error_id, error_str.c_str(), failed_query);
+		}
+		else if (Unthreaded || Callback.Name.length() > 0)
+		{
+			Result = new CMySQLResult;
+			Result->m_WarningCount = mysql_warning_count(mysql_connection);
+			Result->m_AffectedRows = affected_rows;
+			Result->m_InsertID = insert_id;
+			Result->m_Query = Query;
+		}
+	}
+
+	if (!Unthreaded)
+		Handle->DecreaseQueryCounter();
+	return success;
+}
+
 bool CMySQLQuery::ExecutePrepared(MYSQL *mysql_connection)
 {
 	char log_funcname[64];
@@ -258,6 +350,8 @@ bool CMySQLQuery::Execute(MYSQL *mysql_connection)
 {
 	if (IsPreparedStatement)
 		return ExecutePrepared(mysql_connection);
+	if (IsTransaction)
+		return ExecuteTransaction(mysql_connection);
 
 	bool ret_val = false;
 	char log_funcname[64];

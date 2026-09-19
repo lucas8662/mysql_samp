@@ -27,6 +27,26 @@ struct CPreparedStatementTemplate
 static std::map<unsigned int, CPreparedStatementTemplate> PreparedStatements;
 static unsigned int NextPreparedStatementID = 1;
 
+struct CTransactionTemplate
+{
+	unsigned int ConnectionID;
+	vector<string> Queries;
+};
+
+static std::map<unsigned int, CTransactionTemplate> Transactions;
+static unsigned int NextTransactionID = 1;
+
+static void ClearTransactions(unsigned int connectionID)
+{
+	for (std::map<unsigned int, CTransactionTemplate>::iterator it = Transactions.begin(); it != Transactions.end();)
+	{
+		if (it->second.ConnectionID == connectionID)
+			Transactions.erase(it++);
+		else
+			++it;
+	}
+}
+
 static void ClearPreparedStatements(unsigned int connectionID)
 {
 	for (std::map<unsigned int, CPreparedStatementTemplate>::iterator it = PreparedStatements.begin(); it != PreparedStatements.end();)
@@ -956,6 +976,7 @@ AMX_DECLARE_NATIVE(Native::mysql_close)
 	CMySQLHandle *Handle = CMySQLHandle::GetHandle(connection_id);
 	
 	ClearPreparedStatements(connection_id);
+	ClearTransactions(connection_id);
 	Handle->Destroy();
 
 	CCallback::Get()->ClearByHandle(Handle);
@@ -1279,6 +1300,88 @@ AMX_DECLARE_NATIVE(Native::mysql_stmt_close)
 	if (statement == PreparedStatements.end())
 		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_stmt_close", "invalid prepared statement handle (id: %d)", params[1]);
 	PreparedStatements.erase(statement);
+	return 1;
+}
+
+//native MySQLTransaction:mysql_transaction_begin(connectionHandle = 1);
+AMX_DECLARE_NATIVE(Native::mysql_transaction_begin)
+{
+	const unsigned int connectionID = params[1];
+	if (!CMySQLHandle::IsValid(connectionID))
+		return ERROR_INVALID_CONNECTION_HANDLE("mysql_transaction_begin", connectionID);
+	unsigned int transactionID = NextTransactionID++;
+	if (transactionID == 0)
+		transactionID = NextTransactionID++;
+	CTransactionTemplate transaction;
+	transaction.ConnectionID = connectionID;
+	Transactions.insert(std::make_pair(transactionID, transaction));
+	return static_cast<cell>(transactionID);
+}
+
+static CTransactionTemplate *GetTransaction(unsigned int transactionID, char *function)
+{
+	std::map<unsigned int, CTransactionTemplate>::iterator it = Transactions.find(transactionID);
+	if (it == Transactions.end())
+	{
+		CLog::Get()->LogFunction(LOG_ERROR, function, "invalid transaction handle (id: %d)", transactionID);
+		return NULL;
+	}
+	return &it->second;
+}
+
+//native mysql_transaction_query(MySQLTransaction:transaction, const query[]);
+AMX_DECLARE_NATIVE(Native::mysql_transaction_query)
+{
+	CTransactionTemplate *transaction = GetTransaction(params[1], "mysql_transaction_query");
+	if (transaction == NULL)
+		return 0;
+	const char *queryText = NULL;
+	amx_StrParam(amx, params[2], queryText);
+	if (queryText == NULL || *queryText == '\0')
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_transaction_query", "query must not be empty");
+	transaction->Queries.push_back(queryText);
+	return 1;
+}
+
+//native mysql_transaction_commit(MySQLTransaction:transaction, callback[] = "", format[] = "", {Float,_}:...);
+AMX_DECLARE_NATIVE(Native::mysql_transaction_commit)
+{
+	static const int ConstParamCount = 3;
+	std::map<unsigned int, CTransactionTemplate>::iterator it = Transactions.find(params[1]);
+	if (it == Transactions.end())
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_transaction_commit", "invalid transaction handle (id: %d)", params[1]);
+	if (!CMySQLHandle::IsValid(it->second.ConnectionID))
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_transaction_commit", "connection handle is no longer valid");
+	if (it->second.Queries.empty())
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_transaction_commit", "transaction has no queries");
+
+	const char *callbackName = NULL;
+	const char *callbackFormat = NULL;
+	amx_StrParam(amx, params[2], callbackName);
+	amx_StrParam(amx, params[3], callbackFormat);
+	if (callbackFormat != NULL && strlen(callbackFormat) != ((params[0] / 4) - ConstParamCount))
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_transaction_commit", "callback parameter count does not match format specifier length");
+
+	CMySQLQuery *query = new CMySQLQuery;
+	query->Query = "transaction";
+	query->TransactionQueries = it->second.Queries;
+	query->IsTransaction = true;
+	query->Callback.Name = callbackName != NULL ? callbackName : string();
+	if (callbackFormat != NULL)
+		CCallback::Get()->FillCallbackParams(query->Callback.Params, callbackFormat, amx, params, ConstParamCount);
+	query->Handle = CMySQLHandle::GetHandle(it->second.ConnectionID);
+	Transactions.erase(it);
+	query->Handle->QueueQuery(query);
+	return 1;
+}
+
+//native mysql_transaction_rollback(MySQLTransaction:transaction);
+AMX_DECLARE_NATIVE(Native::mysql_transaction_rollback)
+{
+	std::map<unsigned int, CTransactionTemplate>::iterator it = Transactions.find(params[1]);
+	if (it == Transactions.end())
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_transaction_rollback", "invalid transaction handle (id: %d)", params[1]);
+	Transactions.erase(it);
 	return 1;
 }
 

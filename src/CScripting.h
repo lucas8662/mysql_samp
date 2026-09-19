@@ -64,6 +64,11 @@ namespace Native
 	AMX_DECLARE_NATIVE(mysql_stmt_bind_string);
 	AMX_DECLARE_NATIVE(mysql_stmt_execute);
 	AMX_DECLARE_NATIVE(mysql_stmt_close);
+
+	AMX_DECLARE_NATIVE(mysql_transaction_begin);
+	AMX_DECLARE_NATIVE(mysql_transaction_query);
+	AMX_DECLARE_NATIVE(mysql_transaction_commit);
+	AMX_DECLARE_NATIVE(mysql_transaction_rollback);
 	
 	AMX_DECLARE_NATIVE(mysql_stat);
 	AMX_DECLARE_NATIVE(mysql_set_charset);
