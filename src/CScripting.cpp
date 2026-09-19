@@ -1175,8 +1175,6 @@ AMX_DECLARE_NATIVE(Native::mysql_query)
 		stored_result_id = Handle->SaveActiveResult();
 		query.Result = NULL;
 	}
-	delete query.Result;
-
 	return static_cast<cell>(stored_result_id);
 }
 
@@ -1454,10 +1452,7 @@ AMX_DECLARE_NATIVE(Native::mysql_query_file)
 		query.Handle = handle;
 		query.Unthreaded = true;
 		if (!query.Execute(handle->GetMainConnection()->GetMysqlPtr()))
-		{
-			delete query.Result;
 			return 0;
-		}
 
 		if (index + 1 == queries.size() && useCache)
 		{
@@ -1465,7 +1460,6 @@ AMX_DECLARE_NATIVE(Native::mysql_query_file)
 			resultID = handle->SaveActiveResult();
 			query.Result = NULL;
 		}
-		delete query.Result;
 	}
 
 	CLog::Get()->LogFunction(LOG_DEBUG, "mysql_query_file", "executed %d queries from %s", static_cast<int>(queries.size()), path.c_str());

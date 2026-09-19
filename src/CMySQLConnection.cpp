@@ -16,8 +16,6 @@ CMySQLConnection *CMySQLConnection::Create(string &host, string &user, string &p
 
 void CMySQLConnection::Destroy()
 {
-	if(m_IsConnected)
-		Disconnect();
 	delete this;
 }
 
@@ -46,22 +44,24 @@ CMySQLConnection::~CMySQLConnection()
 {
 	if(m_QueryThread != NULL)
 	{
-		bool func_queue_empty = false;
-		do
-		{
-			m_FuncQueueMtx.lock();
-			func_queue_empty = m_FuncQueue.empty();
-			m_FuncQueueMtx.unlock();
-			this_thread::sleep_for(chrono::milliseconds(5));
-		} while (func_queue_empty == false);
-
+		// Do not leave queued work running against a connection that is about to
+		// disappear.  The old path queued Disconnect(), then destroyed this
+		// object immediately, which left the worker with a dangling pointer.
 		m_QueryThreadRunning = false;
 		m_QueryThread->join();
 		delete m_QueryThread;
+		m_QueryThread = NULL;
 	
 		CMySQLQuery *query = NULL;
 		while(m_QueryQueue.pop(query))
 			delete query;
+	}
+
+	if (m_Connection != NULL)
+	{
+		mysql_close(m_Connection);
+		m_Connection = NULL;
+		m_IsConnected = false;
 	}
 }
 
@@ -211,7 +211,7 @@ void CMySQLConnection::ProcessQueries()
 		if(m_IsConnected)
 		{
 			CMySQLQuery *query;
-			while(m_QueryQueue.pop(query))
+			while(m_QueryThreadRunning && m_QueryQueue.pop(query))
 			{
 				if(query->Execute(m_Connection) == false)
 				{

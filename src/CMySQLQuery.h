@@ -83,7 +83,7 @@ public:
 		IsPreparedStatement(false),
 		IsTransaction(false)
 	{}
-	~CMySQLQuery() {}
+	~CMySQLQuery();
 	
 };
 

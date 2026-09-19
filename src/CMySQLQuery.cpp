@@ -9,6 +9,10 @@
 #include <boost/chrono.hpp>
 namespace chrono = boost::chrono;
 
+CMySQLQuery::~CMySQLQuery()
+{
+	delete Result;
+}
 
 static void SetPreparedQueryError(CMySQLQuery *query, char *log_funcname, unsigned int error_id, const char *error_str)
 {

@@ -32,6 +32,8 @@ CMySQLHandle::~CMySQLHandle()
 {
 	for (unordered_map<unsigned int, CMySQLResult*>::iterator it = m_SavedResults.begin(), end = m_SavedResults.end(); it != end; it++)
 		delete it->second;
+	if (m_ActiveResultID == 0)
+		delete m_ActiveResult;
 	
 	ExecuteOnConnections(boost::bind(&CMySQLConnection::Destroy, boost::placeholders::_1));
 
@@ -87,6 +89,12 @@ CMySQLHandle *CMySQLHandle::Create(string host, string user, string pass, string
 		SQLHandle.insert( unordered_map<unsigned int, CMySQLHandle*>::value_type(id, handle) );
 
 		CLog::Get()->LogFunction(LOG_DEBUG, "CMySQLHandle::Create", "connection created (id: %d)", id);
+	}
+	else
+	{
+		// The temporary connection used for duplicate detection is not owned by
+		// the existing handle.
+		main_connection->Destroy();
 	}
 	return handle;
 }
@@ -223,10 +231,10 @@ bool CMySQLHandle::SetActiveResult(unsigned int resultid)
 
 void CMySQLHandle::ClearAll()
 {
-	for(unordered_map<unsigned int, CMySQLHandle *>::iterator i = SQLHandle.begin(); i != SQLHandle.end(); ++i)
-		i->second->Destroy();
-	
-	SQLHandle.clear();
+	// Destroy() erases itself from SQLHandle, so iterating while destroying
+	// invalidates the iterator. Pop one entry at a time instead.
+	while (!SQLHandle.empty())
+		SQLHandle.begin()->second->Destroy();
 }
 
 void CMySQLHandle::SetActiveResult(CMySQLResult *result)
