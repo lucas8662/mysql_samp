@@ -26,6 +26,7 @@ jobs:
               libboost-date-time-dev:i386 libboost-system-dev:i386 libboost-atomic-dev:i386 \
               libssl-dev:i386 zlib1g-dev:i386
             make all
+            make check
             if readelf -d bin/mysql_static.so | grep -Eq "libssl\\.so|libcrypto\\.so"; then
               echo "mysql_static.so must not depend on a system OpenSSL library"
               exit 1

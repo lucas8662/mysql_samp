@@ -1,6 +1,6 @@
 # Plugin MySQL para SA:MP / open.mp
 
-Plugin R39-6 para Pawn, atualizado para usar o **MariaDB Connector/C 3.4.9**.
+Plugin R39-6 para Pawn, atualizado para usar o **MariaDB Connector/C 3.4.11**.
 Ele mantém as mesmas natives e a mesma include `a_mysql.inc`, portanto os
 gamemodes existentes não precisam ser alterados.
 
@@ -21,14 +21,16 @@ plugins mysql.so
 No Windows, use `mysql.dll` e carregue o plugin como `mysql`.
 
 Os binários Linux são x86 (32 bits), pois devem ter a mesma arquitetura do
-servidor open.mp usado neste projeto. `mysql.so` e `mysql_static.so` têm o
-mesmo conteúdo: ambos incluem o conector MariaDB estaticamente.
+servidor open.mp usado neste projeto. Ambos incluem o conector MariaDB
+estaticamente; `mysql.so` usa OpenSSL do sistema, enquanto `mysql_static.so`
+também inclui OpenSSL estaticamente.
 
 ### Dependências em Linux
 
 Não é necessário instalar `libmysqlclient` ou `libmariadb` no servidor: o
 conector já está no plugin. O host ainda precisa das bibliotecas de execução
-de 32 bits do Ubuntu 20.04, inclusive OpenSSL 1.1, C/C++ e pthread.
+de 32 bits do Ubuntu 20.04, incluindo C/C++ e pthread. Para `mysql.so`, também
+é necessário OpenSSL 1.1; `mysql_static.so` não depende do OpenSSL do sistema.
 
 ## Compatibilidade com banco de dados
 
@@ -50,7 +52,12 @@ retornados pelo servidor MySQL/MariaDB.
 
 ## Alterações desta atualização
 
-- MariaDB Connector/C 3.4.9 incluído em `third_party/mariadb-connector-c`.
+- MariaDB Connector/C 3.4.11 incluído em `third_party/mariadb-connector-c`.
+- Fonte oficial fixada na tag `v3.4.11`, commit
+  `be67a4fc1e0493913732df90e562f122bff9dfe3` do
+  [MariaDB Connector/C](https://github.com/mariadb-corporation/mariadb-connector-c/tree/v3.4.11).
+  Inclui correções de TLS, validação de resultados recebidos e prepared
+  statements; a API Pawn e as opções de autenticação do plugin permanecem iguais.
 - Plugins de autenticação MySQL 8 compilados de forma estática.
 - Removida a dependência antiga de `libmysqlclient_r`.
 - Corrigida a cópia do cache de resultados para usar `mysql_fetch_lengths()`,
@@ -131,6 +138,11 @@ make all
 ```
 
 Os arquivos gerados ficam em `bin/mysql.so` e `bin/mysql_static.so`.
+
+Depois da compilação, execute `make check` para verificar o carregamento dos
+dois plugins, a versão 3.4.11, a inicialização do conector e a presença dos
+métodos de autenticação MySQL 8. Esse teste não conecta a um banco; conexões,
+consultas e TLS devem ser validados também no ambiente de homologação.
 
 ### Windows x86
 

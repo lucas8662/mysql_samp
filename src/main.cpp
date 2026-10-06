@@ -34,7 +34,7 @@ PLUGIN_EXPORT bool PLUGIN_CALL Load(void **ppData)
 	
 	CLog::Get()->Initialize("mysql_log.txt"); 
 
-	logprintf(" >> plugin.mysql: R39-6 (MariaDB Connector/C 3.4.9) successfully loaded.");
+	logprintf(" >> plugin.mysql: R39-6 (MariaDB Connector/C %s) successfully loaded.", mysql_get_client_info());
 	return true;
 }
 

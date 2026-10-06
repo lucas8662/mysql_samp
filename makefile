@@ -3,6 +3,8 @@ GCC ?= gcc -m32
 CONNECTOR_DIR ?= third_party/mariadb-connector-c
 CONNECTOR_BUILD_DIR ?= $(CONNECTOR_DIR)/build-linux-x86
 
+.PHONY: all dynamic static connector compile link dynamic_link static_link clean check
+
 
 COMPILE_FLAGS = -c -O3 -w -fPIC -DLINUX -Wall -I libs/ -I libs/sdk/amx/ -I $(CONNECTOR_DIR)/include -I $(CONNECTOR_BUILD_DIR)/include
 DYNAMIC_LIBRARIES = -Wl,-Bstatic -lboost_thread -lboost_chrono -lboost_date_time -lboost_system -lboost_atomic -lmariadbclient -Wl,-Bdynamic -lssl -lcrypto -lz -ldl -pthread -lrt
@@ -12,6 +14,12 @@ STATIC_LIBRARIES = -Wl,-Bstatic -lboost_thread -lboost_chrono -lboost_date_time 
 all: connector compile dynamic_link static_link clean
 dynamic: connector compile dynamic_link clean
 static: connector compile static_link clean
+
+# Run after make all; loads the actual binaries without connecting to a database.
+check:
+	@ $(GCC) -I $(CONNECTOR_DIR)/include -I $(CONNECTOR_BUILD_DIR)/include tests/connector_smoke.c -ldl -o bin/connector_smoke
+	@ bin/connector_smoke ./bin/mysql.so
+	@ bin/connector_smoke ./bin/mysql_static.so
 
 connector:
 	@CC="gcc" CXX="g++" cmake -S $(CONNECTOR_DIR) -B $(CONNECTOR_BUILD_DIR) -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-m32" -DCMAKE_CXX_FLAGS="-m32" -DWITH_SSL=OPENSSL -DOPENSSL_USE_STATIC_LIBS=TRUE -DCLIENT_PLUGIN_CACHING_SHA2_PASSWORD=STATIC -DCLIENT_PLUGIN_SHA256_PASSWORD=STATIC

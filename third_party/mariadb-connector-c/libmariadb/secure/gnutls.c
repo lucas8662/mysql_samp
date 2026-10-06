@@ -1178,32 +1178,43 @@ error:
   return NULL;
 }
 
-#ifdef GNUTLS_EXTERNAL_TRANSPORT
+/* All TLS traffic is routed through the pvio read/write methods (and therefore
+   through the always non-blocking socket and its poll()/select() based timeout
+   handling) instead of letting GnuTLS operate on the file descriptor directly.
+
+   The transport pointer is the GnuTLS session; the pvio is recovered from
+   the MYSQL handle stored on the session. */
+static MARIADB_PVIO *ma_pvio_from_session(gnutls_session_t ssl)
+{
+  MYSQL *mysql= (MYSQL *)gnutls_session_get_ptr(ssl);
+  return mysql ? mysql->net.pvio : NULL;
+}
+
+
+/* The pvio read/write methods block (poll() in sync, fiber yield in async),
+   so GnuTLS sees an ordinary blocking transport - no GNUTLS_E_AGAIN handling
+   and no separate async path are needed. */
 ssize_t ma_tls_push(gnutls_transport_ptr_t ptr, const void* data, size_t len)
 {
-  MARIADB_PVIO *pvio= (MARIADB_PVIO *)ptr;
-  ssize_t rc= pvio->methods->write(pvio, data, len);
-  return rc;
+  MARIADB_PVIO *pvio= ma_pvio_from_session((gnutls_session_t)ptr);
+  return pvio->methods->write(pvio, data, len);
 }
 
 ssize_t ma_tls_pull(gnutls_transport_ptr_t ptr, void* data, size_t len)
 {
-  MARIADB_PVIO *pvio= (MARIADB_PVIO *)ptr;
-  ssize_t rc= pvio->methods->read(pvio, data, len);
-  return rc;
+  MARIADB_PVIO *pvio= ma_pvio_from_session((gnutls_session_t)ptr);
+  return pvio->methods->read(pvio, data, len);
 }
 
 static int ma_tls_pull_timeout(gnutls_transport_ptr_t ptr, unsigned int ms)
 {
-  MARIADB_PVIO *pvio= (MARIADB_PVIO *)ptr;
-  return pvio->methods->wait_io_or_timeout(pvio, 0, ms);
+  MARIADB_PVIO *pvio= ma_pvio_from_session((gnutls_session_t)ptr);
+  return ma_pvio_wait_io_or_timeout(pvio, TRUE, (int)ms);
 }
-#endif
 
 my_bool ma_tls_connect(MARIADB_TLS *ctls)
 {
   gnutls_session_t ssl = (gnutls_session_t)ctls->ssl;
-  my_bool blocking;
   MYSQL *mysql= (MYSQL *)gnutls_session_get_ptr(ssl);
   MARIADB_PVIO *pvio;
   int ret;
@@ -1213,24 +1224,27 @@ my_bool ma_tls_connect(MARIADB_TLS *ctls)
 
   pvio= mysql->net.pvio;
 
-  /* Set socket to blocking if not already set */
-  if (!(blocking= pvio->methods->is_blocking(pvio)))
-    pvio->methods->blocking(pvio, TRUE, 0);
-
-
-#ifdef GNUTLS_EXTERNAL_TRANSPORT
-  /* we don't use GnuTLS read/write functions */
-  gnutls_transport_set_ptr(ssl, pvio);
+  /* Route I/O through the pvio read/write methods. The transport pointer is
+     the session itself so the callbacks can recover both the pvio and the
+     session (the latter is needed to report EAGAIN back to GnuTLS). */
+  gnutls_transport_set_ptr(ssl, ssl);
   gnutls_transport_set_push_function(ssl, ma_tls_push);
   gnutls_transport_set_pull_function(ssl, ma_tls_pull);
   gnutls_transport_set_pull_timeout_function(ssl, ma_tls_pull_timeout);
   gnutls_handshake_set_timeout(ssl, pvio->timeout[PVIO_CONNECT_TIMEOUT]);
-#else
-  gnutls_transport_set_int(ssl, mysql_get_socket(mysql));
-#endif
 
+  /* The pull/push callbacks block (poll() in sync, fiber yield in async), so
+     gnutls_handshake() normally completes without GNUTLS_E_AGAIN. The loop is
+     kept defensive: ma_pvio_wait_io_or_timeout() yields in async mode. */
   do {
     ret = gnutls_handshake(ssl);
+    if (ret == GNUTLS_E_AGAIN || ret == GNUTLS_E_INTERRUPTED)
+    {
+      int dir= gnutls_record_get_direction(ssl); /* 0 read, 1 write */
+      if (ma_pvio_wait_io_or_timeout(pvio, dir == 0,
+            pvio->timeout[PVIO_CONNECT_TIMEOUT]) < 1)
+        break;
+    }
   } while (ret < 0 && gnutls_error_is_fatal(ret) == 0);
 
   if (ret < 0)
@@ -1241,39 +1255,11 @@ my_bool ma_tls_connect(MARIADB_TLS *ctls)
       ma_tls_set_error(mysql, ssl, ret);
 
     ma_tls_close(ctls);
-
-    /* restore blocking mode */
-    if (!blocking)
-      pvio->methods->blocking(pvio, FALSE, 0);
     return 1;
   }
   ctls->ssl= (void *)ssl;
 
   return 0;
-}
-
-ssize_t ma_tls_write_async(MARIADB_PVIO *pvio, const uchar *buffer, size_t length)
-{
-  ssize_t res;
-  struct mysql_async_context *b= pvio->mysql->options.extension->async_context;
-  MARIADB_TLS *ctls= pvio->ctls;
-
-  for (;;)
-  {
-    b->events_to_wait_for= 0;
-    res= gnutls_record_send((gnutls_session_t)ctls->ssl, (void *)buffer, length);
-    if (res > 0)
-      return res;
-    if (res == GNUTLS_E_AGAIN)
-      b->events_to_wait_for|= MYSQL_WAIT_WRITE;
-    else
-      return res;
-    if (b->suspend_resume_hook)
-      (*b->suspend_resume_hook)(TRUE, b->suspend_resume_hook_user_data);
-    my_context_yield(&b->async_context);
-    if (b->suspend_resume_hook)
-      (*b->suspend_resume_hook)(FALSE, b->suspend_resume_hook_user_data);
-  }
 }
 
 static gnutls_x509_crt_t ma_get_cert(MARIADB_TLS *ctls)
@@ -1368,51 +1354,52 @@ unsigned int ma_tls_get_peer_cert_info(MARIADB_TLS *ctls, uint hash_size)
 }
 
 
-ssize_t ma_tls_read_async(MARIADB_PVIO *pvio, const uchar *buffer, size_t length)
-{
-  ssize_t res;
-  struct mysql_async_context *b= pvio->mysql->options.extension->async_context;
-  MARIADB_TLS *ctls= pvio->ctls;
-
-  for (;;)
-  {
-    b->events_to_wait_for= 0;
-    res= gnutls_record_recv((gnutls_session_t)ctls->ssl, (void *)buffer, length);
-    if (res > 0)
-      return res;
-    if (res == GNUTLS_E_AGAIN)
-      b->events_to_wait_for|= MYSQL_WAIT_READ;
-    else
-      return res;
-    if (b->suspend_resume_hook)
-      (*b->suspend_resume_hook)(TRUE, b->suspend_resume_hook_user_data);
-    my_context_yield(&b->async_context);
-    if (b->suspend_resume_hook)
-      (*b->suspend_resume_hook)(FALSE, b->suspend_resume_hook_user_data);
-  }
-}
-
 ssize_t ma_tls_read(MARIADB_TLS *ctls, const uchar* buffer, size_t length)
 {
   ssize_t rc;
   MARIADB_PVIO *pvio= ctls->pvio;
 
+  /* The pull callback blocks (poll() in sync, fiber yield in async), so this
+     normally runs once; the loop is kept defensive for GNUTLS_E_AGAIN. */
   while ((rc= gnutls_record_recv((gnutls_session_t)ctls->ssl, (void *)buffer, length)) <= 0)
   {
     if (rc != GNUTLS_E_AGAIN && rc != GNUTLS_E_INTERRUPTED)
       break;
-    if (pvio->methods->wait_io_or_timeout(pvio, TRUE, pvio->mysql->options.read_timeout) < 1)
+    if (ma_pvio_wait_io_or_timeout(pvio, TRUE,
+          pvio->timeout[PVIO_READ_TIMEOUT]) < 1)
       break;
   }
   if (rc <= 0) {
-    MYSQL *mysql= (MYSQL *)gnutls_session_get_ptr(ctls->ssl);
-    ma_tls_set_error(mysql, ctls->ssl, rc);
+    /*
+      Peer closed the connection.  Return 0 so the caller reports
+      CR_SERVER_LOST instead of a misleading CR_SSL_CONNECTION_ERROR.
+
+      - rc == 0: orderly TLS shutdown (close_notify received).
+        Mirrors schannel.c SEC_I_CONTEXT_EXPIRED handling.
+      - GNUTLS_E_PREMATURE_TERMINATION: peer closed without
+        close_notify (GnuTLS 3.7.4+).
+      - GNUTLS_E_UNEXPECTED_PACKET_LENGTH: same condition on
+        GnuTLS < 3.7.4 (min required version is 3.5).
+    */
+    if (rc == 0
+#ifdef GNUTLS_E_PREMATURE_TERMINATION
+        || rc == GNUTLS_E_PREMATURE_TERMINATION
+#endif
+#ifdef GNUTLS_E_UNEXPECTED_PACKET_LENGTH
+        || rc == GNUTLS_E_UNEXPECTED_PACKET_LENGTH
+#endif
+       )
+      return 0;
+    {
+      MYSQL *mysql= (MYSQL *)gnutls_session_get_ptr(ctls->ssl);
+      ma_tls_set_error(mysql, ctls->ssl, rc);
+    }
   }
   return rc;
 }
 
 ssize_t ma_tls_write(MARIADB_TLS *ctls, const uchar* buffer, size_t length)
-{ 
+{
   ssize_t rc;
   MARIADB_PVIO *pvio= ctls->pvio;
 
@@ -1420,7 +1407,8 @@ ssize_t ma_tls_write(MARIADB_TLS *ctls, const uchar* buffer, size_t length)
   {
     if (rc != GNUTLS_E_AGAIN && rc != GNUTLS_E_INTERRUPTED)
       break;
-    if (pvio->methods->wait_io_or_timeout(pvio, TRUE, pvio->mysql->options.write_timeout) < 1)
+    if (ma_pvio_wait_io_or_timeout(pvio, FALSE,
+          pvio->timeout[PVIO_WRITE_TIMEOUT]) < 1)
       break;
   }
   if (rc <= 0) {
@@ -1470,6 +1458,15 @@ static void set_verification_error(MYSQL *mysql, int status)
   gnutls_free(out.data);
 }
 
+static my_bool ma_gnutls_is_self_signed(gnutls_x509_crt_t cert)
+{
+  if (!cert)
+    return FALSE;
+
+  /* Returns 1 if cert was issued by cert (self-issued) */
+  return (gnutls_x509_crt_check_issuer(cert, cert) == 1);
+}
+
 int ma_tls_verify_server_cert(MARIADB_TLS *ctls, unsigned int flags)
 {
   unsigned int status= 0;
@@ -1487,12 +1484,43 @@ int ma_tls_verify_server_cert(MARIADB_TLS *ctls, unsigned int flags)
   if (status)
   {
     set_verification_error(mysql, status);
+
     if (status & GNUTLS_CERT_REVOKED)
-      mysql->net.tls_verify_status|= MARIADB_TLS_VERIFY_REVOKED;
-    if (status & GNUTLS_CERT_SIGNER_NOT_FOUND)
-      mysql->net.tls_verify_status|= MARIADB_TLS_VERIFY_TRUST;
+      mysql->net.tls_verify_status |= MARIADB_TLS_VERIFY_REVOKED;
+
     if ((status & GNUTLS_CERT_NOT_ACTIVATED) || (status & GNUTLS_CERT_EXPIRED))
-      mysql->net.tls_verify_status|= MARIADB_TLS_VERIFY_PERIOD;
+      mysql->net.tls_verify_status |= MARIADB_TLS_VERIFY_PERIOD;
+
+    /* Map GnuTLS hostname mismatch bit directly */
+    if (status & GNUTLS_CERT_UNEXPECTED_OWNER)
+      mysql->net.tls_verify_status |= MARIADB_TLS_VERIFY_HOST;
+
+    if (status & GNUTLS_CERT_SIGNER_NOT_FOUND)
+    {
+      gnutls_x509_crt_t cert = ma_get_cert(ctls);
+      my_bool self_signed = ma_gnutls_is_self_signed(cert);
+      if (cert)
+        gnutls_x509_crt_deinit(cert);
+
+      if (self_signed)
+        mysql->net.tls_verify_status |= MARIADB_TLS_VERIFY_TRUST;
+      else
+        mysql->net.tls_verify_status |= MARIADB_TLS_VERIFY_UNKNOWN;
+    }
+
+    /* Fallback for unhandled GnuTLS bits (e.g. INSECURE_ALGORITHM, SIGNATURE_FAILURE) */
+#define HANDLED_GNUTLS_CERT_FLAGS \
+    (GNUTLS_CERT_INVALID | \
+     GNUTLS_CERT_REVOKED | \
+     GNUTLS_CERT_SIGNER_NOT_FOUND | \
+     GNUTLS_CERT_NOT_ACTIVATED | \
+     GNUTLS_CERT_EXPIRED | \
+     GNUTLS_CERT_UNEXPECTED_OWNER)
+
+    if (status & ~HANDLED_GNUTLS_CERT_FLAGS)
+      mysql->net.tls_verify_status |= MARIADB_TLS_VERIFY_UNKNOWN;
+
+#undef HANDLED_GNUTLS_CERT_FLAGS
   }
 
   if (flags & MARIADB_TLS_VERIFY_HOST)
@@ -1519,10 +1547,15 @@ int ma_tls_verify_server_cert(MARIADB_TLS *ctls, unsigned int flags)
                      ER(CR_SSL_CONNECTION_ERROR),
                      "Certificate subject name doesn't match specified hostname");
       mysql->net.tls_verify_status|= MARIADB_TLS_VERIFY_HOST;
-    }    
+    }
   }
 end:
-  return mysql->net.tls_verify_status & flags;
+  if ((mysql->net.tls_verify_status > MARIADB_TLS_VERIFY_FINGERPRINT) ||
+      (mysql->net.tls_verify_status & flags))
+  {
+    return MARIADB_TLS_VERIFY_ERROR;
+  }
+  return 0;
 }
 
 const char *ma_tls_get_cipher(MARIADB_TLS *ctls)
