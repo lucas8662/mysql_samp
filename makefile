@@ -20,6 +20,8 @@ check:
 	@ $(GCC) -I $(CONNECTOR_DIR)/include -I $(CONNECTOR_BUILD_DIR)/include tests/connector_smoke.c -ldl -o bin/connector_smoke
 	@ bin/connector_smoke ./bin/mysql.so
 	@ bin/connector_smoke ./bin/mysql_static.so
+	@ $(GPP) -std=c++11 -DLINUX -DHAVE_STDINT_H -I src -I libs -I libs/sdk/amx -I $(CONNECTOR_DIR)/include -I $(CONNECTOR_BUILD_DIR)/include tests/orm_regression.cpp -L bin -l:mysql_static.so -Wl,-rpath,'$$ORIGIN' -o bin/orm_regression
+	@ bin/orm_regression
 
 connector:
 	@CC="gcc" CXX="g++" cmake -S $(CONNECTOR_DIR) -B $(CONNECTOR_BUILD_DIR) -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-m32" -DCMAKE_CXX_FLAGS="-m32" -DWITH_SSL=OPENSSL -DOPENSSL_USE_STATIC_LIBS=TRUE -DCLIENT_PLUGIN_CACHING_SHA2_PASSWORD=STATIC -DCLIENT_PLUGIN_SHA256_PASSWORD=STATIC

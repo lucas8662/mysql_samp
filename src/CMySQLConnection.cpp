@@ -156,17 +156,21 @@ bool CMySQLConnection::Disconnect()
 
 bool CMySQLConnection::EscapeString(const char *src, string &dest)
 {
-	if (src != NULL && m_IsConnected)
+	dest.clear();
+	if (src != NULL && m_IsConnected && m_Connection != NULL)
 	{
 		const size_t src_len = strlen(src);
 		char *tmpEscapedStr = static_cast<char *>(malloc((src_len * 2 + 1) * sizeof(char)));
+		if (tmpEscapedStr == NULL) return false;
 
-		mysql_real_escape_string(m_Connection, tmpEscapedStr, src, src_len);
-		dest.assign(tmpEscapedStr);
+		const unsigned long length = mysql_real_escape_string(m_Connection, tmpEscapedStr, src, src_len);
+		if (length > src_len * 2) { free(tmpEscapedStr); return false; }
+		dest.assign(tmpEscapedStr, length);
 
 		free(tmpEscapedStr);
+		return true;
 	}
-	return true;
+	return false;
 }
 
 bool CMySQLConnection::SetCharset(string charset)

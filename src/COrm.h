@@ -5,6 +5,7 @@
 
 #include <string>
 #include <vector>
+#include <memory>
 #include <boost/unordered_map.hpp>
 #include <boost/variant.hpp>
 
@@ -29,7 +30,10 @@ class CMySQLResult;
 class COrm 
 {
 public:
-	static unsigned int Create(const char *table, CMySQLHandle *connhandle);
+	static unsigned int Create(const char *table, CMySQLHandle *connhandle, AMX *owner = NULL);
+	static void ClearByHandle(CMySQLHandle *handle);
+	static void ClearByAmx(AMX *owner);
+	std::weak_ptr<void> GetLifetime() const { return m_Lifetime; }
 	void Destroy();
 
 	static inline bool IsValid(int id) 
@@ -82,11 +86,14 @@ private:
 		string Name;
 		unsigned short Datatype;
 	};
+	bool GetVariableValue(const SVarInfo *var, string &value) const;
 	
 	static unordered_map<unsigned int, COrm *> OrmHandle;
 
 
 	COrm() :
+		m_Lifetime(std::make_shared<int>(0)),
+		m_Owner(NULL),
 		m_KeyVar(NULL),
 
 		m_ConnHandle(NULL),
@@ -95,6 +102,8 @@ private:
 		m_ErrorID(0)
 	{}
 	~COrm();
+	std::shared_ptr<void> m_Lifetime;
+	AMX *m_Owner;
 	
 	vector<SVarInfo *> m_Vars;
 	SVarInfo *m_KeyVar;

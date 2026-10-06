@@ -24,6 +24,12 @@ void CCallback::ProcessCallbacks()
 	CMySQLQuery *query = NULL;
 	while(m_CallbackQueue.pop(query))
 	{
+		// ORM destruction/script unload cancels application, not SQL already sent.
+		if (query->Orm.Cancelled())
+		{
+			delete query;
+			continue;
+		}
 		if (query->Orm.Object != NULL)
 		{
 			switch (query->Orm.Type)

@@ -188,7 +188,7 @@ AMX_DECLARE_NATIVE(Native::orm_create)
 		return ERROR_INVALID_CONNECTION_HANDLE("orm_create", connection_id);
 	
 
-	return static_cast<cell>(COrm::Create(table_name, CMySQLHandle::GetHandle(connection_id)));
+	return static_cast<cell>(COrm::Create(table_name, CMySQLHandle::GetHandle(connection_id), amx));
 }
 
 //native orm_destroy(ORM:id);
@@ -269,6 +269,8 @@ AMX_DECLARE_NATIVE(Native::orm_select)
 
 		query->Handle = Handle;
 		query->Orm.Object = OrmObject;
+		query->Orm.Lifetime = OrmObject->GetLifetime();
+		query->Orm.Bound = true;
 		query->Orm.Type = ORM_QUERYTYPE_SELECT;
 	
 		if (Handle->QueueQuery(query))
@@ -309,6 +311,8 @@ AMX_DECLARE_NATIVE(Native::orm_update)
 		
 		query->Handle = Handle;
 		query->Orm.Object = OrmObject;
+		query->Orm.Lifetime = OrmObject->GetLifetime();
+		query->Orm.Bound = true;
 		query->Orm.Type = ORM_QUERYTYPE_UPDATE;
 
 		if (Handle->QueueQuery(query))
@@ -362,6 +366,8 @@ AMX_DECLARE_NATIVE(Native::orm_insert)
 		
 		query->Handle = Handle;
 		query->Orm.Object = OrmObject;
+		query->Orm.Lifetime = OrmObject->GetLifetime();
+		query->Orm.Bound = true;
 		query->Orm.Type = ORM_QUERYTYPE_INSERT;
 
 		if (Handle->QueueQuery(query))
@@ -403,6 +409,8 @@ AMX_DECLARE_NATIVE(Native::orm_delete)
 		
 		query->Handle = Handle;
 		query->Orm.Object = OrmObject;
+		query->Orm.Lifetime = OrmObject->GetLifetime();
+		query->Orm.Bound = true;
 		query->Orm.Type = ORM_QUERYTYPE_DELETE;
 
 		if (!Handle->QueueQuery(query))
@@ -464,6 +472,8 @@ AMX_DECLARE_NATIVE(Native::orm_save)
 	
 		query->Handle = Handle;
 		query->Orm.Object = OrmObject;
+		query->Orm.Lifetime = OrmObject->GetLifetime();
+		query->Orm.Bound = true;
 
 		if (Handle->QueueQuery(query))
 			return 1;
@@ -528,7 +538,10 @@ AMX_DECLARE_NATIVE(Native::orm_addvar_string)
 	if (!COrm::IsValid(orm_id))
 		return ERROR_INVALID_ORM_ID("orm_addvar_string", orm_id);
 
-	if (var_maxlen <= 0)
+	if (var_maxlen <= 0 || params[2] < 0 || amx->stp < 0 ||
+	    static_cast<size_t>(params[2]) > static_cast<size_t>(amx->stp) ||
+	    static_cast<size_t>(var_maxlen) >
+	        (static_cast<size_t>(amx->stp) - static_cast<size_t>(params[2])) / sizeof(cell))
 		return CLog::Get()->LogFunction(LOG_ERROR, "orm_addvar_string", "invalid variable length specified");
 
 

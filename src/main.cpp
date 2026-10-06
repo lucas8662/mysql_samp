@@ -3,6 +3,7 @@
 #include "CMySQLHandle.h"
 #include "CCallback.h"
 #include "CLog.h"
+#include "COrm.h"
 
 #ifdef WIN32
 	#include <WinSock2.h>
@@ -152,6 +153,7 @@ PLUGIN_EXPORT int PLUGIN_CALL AmxLoad(AMX *amx)
 
 PLUGIN_EXPORT int PLUGIN_CALL AmxUnload(AMX *amx) 
 {
+	COrm::ClearByAmx(amx);
 	CCallback::Get()->EraseAmx(amx);
 	return AMX_ERR_NONE;
 }

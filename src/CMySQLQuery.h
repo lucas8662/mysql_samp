@@ -6,6 +6,7 @@
 #include <string>
 #include <stack>
 #include <vector>
+#include <memory>
 #include <boost/variant.hpp>
 
 using std::string;
@@ -67,10 +68,14 @@ public:
 	{
 		s_Orm() :
 			Object(NULL),
+			Bound(false),
 			Type(0)
 		{}
 		
 		COrm *Object;
+		std::weak_ptr<void> Lifetime;
+		bool Bound;
+		bool Cancelled() const { return Bound && Lifetime.expired(); }
 		unsigned short Type;
 	} Orm;
 

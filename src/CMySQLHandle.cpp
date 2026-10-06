@@ -2,6 +2,7 @@
 #include "CMySQLResult.h"
 #include "CMySQLConnection.h"
 #include "CLog.h"
+#include "COrm.h"
 
 
 #include <boost/bind/bind.hpp>
@@ -101,6 +102,7 @@ CMySQLHandle *CMySQLHandle::Create(string host, string user, string pass, string
 
 void CMySQLHandle::Destroy() 
 {
+	COrm::ClearByHandle(this);
 	if (ActiveHandle == this)
 		ActiveHandle = NULL;
 

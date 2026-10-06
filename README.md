@@ -141,8 +141,28 @@ Os arquivos gerados ficam em `bin/mysql.so` e `bin/mysql_static.so`.
 
 Depois da compilação, execute `make check` para verificar o carregamento dos
 dois plugins, a versão 3.4.11, a inicialização do conector e a presença dos
-métodos de autenticação MySQL 8. Esse teste não conecta a um banco; conexões,
+métodos de autenticação MySQL 8, além das regressões do ORM. Esses testes não
+conectam a um banco; conexões,
 consultas e TLS devem ser validados também no ambiente de homologação.
+
+### Segurança e comportamento do ORM
+
+- As natives `orm_*` mantêm as mesmas assinaturas.
+- As consultas usam armazenamento dinâmico, sem os buffers fixos antigos de
+  `UPDATE`/`DELETE`, e escapam os nomes de tabelas e colunas.
+- Chaves aceitam somente inteiro ou string. Chaves string são incluídas no
+  `INSERT` e não são sobrescritas pelo ID auto-incrementado de outra coluna.
+- IDs gerados que excedem o limite de uma célula Pawn não são truncados;
+  nesse caso, `orm_errno` retorna `ORM_ERROR_NO_DATA`.
+- Destruir um ORM, descarregar seu script, fechar a conexão ou alterar os
+  campos/chave invalida a aplicação dos resultados e callbacks ORM pendentes.
+  Isso não desfaz consultas SQL já enviadas ao banco.
+- As variáveis associadas precisam continuar válidas até o término da operação
+  assíncrona; não associe variáveis locais temporárias a um ORM persistente.
+
+O teste `tests/orm_regression.cpp` usa o plugin compilado, com funções de strings
+Pawn simuladas, sem um servidor de banco. Ele não substitui a homologação no
+SA:MP/open.mp real.
 
 ### Windows x86
 
