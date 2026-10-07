@@ -97,7 +97,7 @@ int main()
     result.m_InsertID = 42;
     orm->ApplyInsertResult(&result);
     assert(key == 42 && orm->GetErrorID() == ORM_ERROR_OK);
-    result.m_InsertID = static_cast<my_ulonglong>(std::numeric_limits<cell>::max()) + 1;
+    result.m_InsertID = static_cast<my_ulonglong>((std::numeric_limits<cell>::max)()) + 1;
     orm->ApplyInsertResult(&result);
     assert(key == 42 && orm->GetErrorID() == ORM_ERROR_NO_DATA);
 

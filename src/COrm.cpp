@@ -285,7 +285,7 @@ void COrm::ApplyInsertResult(CMySQLResult *result)
 		m_ErrorID = ORM_ERROR_OK;
 		if(m_KeyVar != NULL && m_KeyVar->Datatype == DATATYPE_INT && result->InsertID() != 0)
 		{
-			if (result->InsertID() > static_cast<my_ulonglong>(std::numeric_limits<cell>::max())) {
+			if (result->InsertID() > static_cast<my_ulonglong>((std::numeric_limits<cell>::max)())) {
 				m_ErrorID = ORM_ERROR_NO_DATA;
 				CLog::Get()->LogFunction(LOG_ERROR, "COrm::ApplyInsertResult", "insert id exceeds Pawn cell range");
 				return;

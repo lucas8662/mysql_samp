@@ -59,7 +59,8 @@ target_link_libraries(mysql_plugin PRIVATE
 if(WIN32)
     # The legacy AMX SDK predates MSVC's standard <stdint.h> and otherwise
     # redeclares int32_t/uint32_t with incompatible Windows types.
-    target_compile_definitions(mysql_plugin PRIVATE WIN32 _WINDOWS _USRDLL HAVE_STDINT_H)
+    # Windows min/max macros conflict with standard C++ functions.
+    target_compile_definitions(mysql_plugin PRIVATE WIN32 _WINDOWS _USRDLL HAVE_STDINT_H NOMINMAX)
     target_link_libraries(mysql_plugin PRIVATE ws2_32)
     target_link_options(mysql_plugin PRIVATE "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/plugin.def")
 else()
