@@ -19,13 +19,21 @@ CCallback::~CCallback()
 		delete query;
 }
 
+void CCallback::BindOwner(CMySQLQuery *query, AMX *amx)
+{
+	query->Callback.Owner = amx;
+	auto owner = m_AmxList.find(amx);
+	if (owner != m_AmxList.end())
+		query->Callback.Lifetime = owner->second;
+}
+
 void CCallback::ProcessCallbacks() 
 {
 	CMySQLQuery *query = NULL;
 	while(m_CallbackQueue.pop(query))
 	{
 		// ORM destruction/script unload cancels application, not SQL already sent.
-		if (query->Orm.Cancelled())
+		if (query->Orm.Cancelled() || (query->Callback.Owner != NULL && query->Callback.Lifetime.expired()))
 		{
 			delete query;
 			continue;
@@ -47,9 +55,9 @@ void CCallback::ProcessCallbacks()
 		if (!query->Callback.Name.empty())
 		{
 			const bool pass_by_ref = (query->Callback.Name.find("FJ37DH3JG") != string::npos);
-			for (set<AMX *>::iterator a = m_AmxList.begin(), end = m_AmxList.end(); a != end; ++a)
+			if (query->Callback.Owner != NULL && !query->Callback.Lifetime.expired())
 			{
-				AMX *amx = (*a);
+				AMX *amx = query->Callback.Owner;
 				int amx_index = -1;
 
 				if (amx_FindPublic(amx, query->Callback.Name.c_str(), &amx_index) == AMX_ERR_NONE && amx_index >= 0)
@@ -66,7 +74,7 @@ void CCallback::ProcessCallbacks()
 							{
 								cell tmp_addr;
 								amx_PushArray(amx, &tmp_addr, NULL, (cell*)&boost::get<cell>(value), 1);
-								if (amx_mem_addr < NULL)
+								if (amx_mem_addr < 0)
 									amx_mem_addr = tmp_addr;
 							}
 							else
@@ -76,7 +84,7 @@ void CCallback::ProcessCallbacks()
 						{
 							cell tmp_addr;
 							amx_PushString(amx, &tmp_addr, NULL, boost::get<string>(value).c_str(), 0, 0);
-							if (amx_mem_addr < NULL)
+							if (amx_mem_addr < 0)
 								amx_mem_addr = tmp_addr;
 						}
 
@@ -86,19 +94,20 @@ void CCallback::ProcessCallbacks()
 					query->Handle->SetActiveResult(query->Result);
 					query->Result = NULL;
 
+					const std::weak_ptr<void> handleLifetime = query->Handle->GetLifetime();
 					cell amx_ret;
 					amx_Exec(amx, &amx_ret, amx_index);
-					if (amx_mem_addr >= NULL)
+					if (!query->Callback.Lifetime.expired() && amx_mem_addr >= 0)
 						amx_Release(amx, amx_mem_addr);
 
-					if (query->Handle->IsActiveResultSaved() == false)
-						delete query->Handle->GetActiveResult();
-
-					query->Handle->SetActiveResult(static_cast<CMySQLResult *>(NULL));
+					if (!handleLifetime.expired())
+					{
+						if (!query->Handle->IsActiveResultSaved())
+							delete query->Handle->GetActiveResult();
+						query->Handle->SetActiveResult(static_cast<CMySQLResult *>(NULL));
+					}
 
 					CLog::Get()->EndCallback();
-
-					break; //we have found our callback, exit loop
 				}
 			}
 		}

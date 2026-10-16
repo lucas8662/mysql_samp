@@ -6,12 +6,12 @@
 #include <stack>
 #include <string>
 #include <boost/variant.hpp>
-#include <set>
+#include <map>
+#include <memory>
 #include <boost/lockfree/queue.hpp>
 
 using std::stack;
 using std::string;
-using std::set;
 
 #include "main.h"
 
@@ -32,7 +32,7 @@ private:
 		boost::lockfree::capacity<32648>
 	> m_CallbackQueue;
 
-	set<AMX *> m_AmxList;
+	std::map<AMX *, std::shared_ptr<void> > m_AmxList;
 
 	CCallback() { }
 	~CCallback();
@@ -59,13 +59,14 @@ public:
 
 	inline void AddAmx(AMX *amx)
 	{
-		m_AmxList.insert(amx);
+		m_AmxList[amx] = std::make_shared<int>(0);
 	}
 	inline void EraseAmx(AMX *amx)
 	{
 		m_AmxList.erase(amx);
 	}
 
+	void BindOwner(CMySQLQuery *query, AMX *amx);
 	void ClearByHandle(CMySQLHandle *handle);
 
 	void ProcessCallbacks();

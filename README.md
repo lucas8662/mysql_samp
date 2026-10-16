@@ -92,6 +92,10 @@ servidor, preencha as credenciais e conecte sem deixá-las no gamemode:
 new g_SQL = mysql_connect_file("mysql.ini");
 ```
 
+A porta deve estar entre 1 e 65535; `pool_size` aceita de 0 a 64. Valores
+negativos, fora da faixa ou inválidos são rejeitados nas conexões diretas e
+por arquivo.
+
 O arquivo aceita `host`, `user`, `password`, `database`, `port`,
 `auto_reconnect`, `pool_size`, `ssl_enable`, `ssl_key_file`, `ssl_cert_file`,
 `ssl_ca_file`, `ssl_ca_path` e `ssl_cipher`. Quando `ssl_enable = true`, as
@@ -116,7 +120,11 @@ mysql_tquery_file(g_SQL, "schema.sql", "OnSchemaReady");
 mysql_query_file(g_SQL, "schema.sql");
 ```
 
-As queries do arquivo são separadas por `;`. Na forma em thread, o callback é
+As queries do arquivo são separadas por `;`, respeitando strings entre aspas,
+identificadores entre crases, escapes e comentários SQL. Arquivos com aspas ou
+comentários de bloco sem fechamento são rejeitados antes da execução. O parser
+usa as regras padrão de escape do MySQL; diretivas de cliente como `DELIMITER`
+não são suportadas. Na forma em thread, o callback é
 chamado apenas após a última query; qualquer falha chama `OnQueryError`. Na
 forma síncrona, `use_cache = true` salva somente o resultado da última query.
 
@@ -139,9 +147,12 @@ make all
 
 Os arquivos gerados ficam em `bin/mysql.so` e `bin/mysql_static.so`.
 
+Execute `make check-input` para testar o parser SQL e a leitura de números sem
+depender do conector ou de um banco.
+
 Depois da compilação, execute `make check` para verificar o carregamento dos
 dois plugins, a versão 3.4.11, a inicialização do conector e a presença dos
-métodos de autenticação MySQL 8, além das regressões do ORM. Esses testes não
+métodos de autenticação MySQL 8, além das regressões do ORM, de callbacks e de transações com erros simulados. Esses testes não
 conectam a um banco; conexões,
 consultas e TLS devem ser validados também no ambiente de homologação.
 
@@ -234,3 +245,10 @@ public OnTransferComplete(playerid)
 ```
 
 Call `mysql_transaction_rollback` before `mysql_transaction_commit` to discard a transaction that has not been sent to the database.
+
+### Segurança dos callbacks
+
+Callbacks de consultas e `OnQueryError` são executados somente no script que
+originou a operação. Descarregar esse script cancela seus callbacks pendentes,
+inclusive se outro script for carregado no mesmo endereço; o SQL já enviado
+ao banco não é desfeito. É permitido fechar a conexão dentro do callback.

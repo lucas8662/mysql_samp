@@ -67,7 +67,7 @@ public:
 
 	inline bool operator==(CMySQLConnection &rhs)
 	{
-		return (rhs.m_Host.compare(m_Host) == 0 && rhs.m_User.compare(m_User) == 0 && rhs.m_Database.compare(m_Database) == 0 && rhs.m_Passw.compare(m_Passw) == 0
+		return (rhs.m_Port == m_Port && rhs.m_Host.compare(m_Host) == 0 && rhs.m_User.compare(m_User) == 0 && rhs.m_Database.compare(m_Database) == 0 && rhs.m_Passw.compare(m_Passw) == 0
 			&& rhs.m_TLS.Enabled == m_TLS.Enabled && rhs.m_TLS.KeyFile == m_TLS.KeyFile && rhs.m_TLS.CertFile == m_TLS.CertFile
 			&& rhs.m_TLS.CAFile == m_TLS.CAFile && rhs.m_TLS.CAPath == m_TLS.CAPath && rhs.m_TLS.Cipher == m_TLS.Cipher);
 	}

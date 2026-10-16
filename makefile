@@ -3,10 +3,10 @@ GCC ?= gcc -m32
 CONNECTOR_DIR ?= third_party/mariadb-connector-c
 CONNECTOR_BUILD_DIR ?= $(CONNECTOR_DIR)/build-linux-x86
 
-.PHONY: all dynamic static connector compile link dynamic_link static_link clean check
+.PHONY: check-input all dynamic static connector compile link dynamic_link static_link clean check
 
 
-COMPILE_FLAGS = -c -O3 -w -fPIC -DLINUX -Wall -I libs/ -I libs/sdk/amx/ -I $(CONNECTOR_DIR)/include -I $(CONNECTOR_BUILD_DIR)/include
+COMPILE_FLAGS = -c -O3 -fPIC -DLINUX -Wall -I libs/ -I libs/sdk/amx/ -I $(CONNECTOR_DIR)/include -I $(CONNECTOR_BUILD_DIR)/include
 DYNAMIC_LIBRARIES = -Wl,-Bstatic -lboost_thread -lboost_chrono -lboost_date_time -lboost_system -lboost_atomic -lmariadbclient -Wl,-Bdynamic -lssl -lcrypto -lz -ldl -pthread -lrt
 STATIC_LIBRARIES = -Wl,-Bstatic -lboost_thread -lboost_chrono -lboost_date_time -lboost_system -lboost_atomic -lmariadbclient -lssl -lcrypto -Wl,-Bdynamic -lz -ldl -pthread -lrt
 
@@ -16,12 +16,14 @@ dynamic: connector compile dynamic_link clean
 static: connector compile static_link clean
 
 # Run after make all; loads the actual binaries without connecting to a database.
-check:
+check: check-input
 	@ $(GCC) -I $(CONNECTOR_DIR)/include -I $(CONNECTOR_BUILD_DIR)/include tests/connector_smoke.c -ldl -o bin/connector_smoke
 	@ bin/connector_smoke ./bin/mysql.so
 	@ bin/connector_smoke ./bin/mysql_static.so
 	@ $(GPP) -std=c++11 -DLINUX -DHAVE_STDINT_H -I src -I libs -I libs/sdk/amx -I $(CONNECTOR_DIR)/include -I $(CONNECTOR_BUILD_DIR)/include tests/orm_regression.cpp -L bin -l:mysql_static.so -Wl,-rpath,'$$ORIGIN' -o bin/orm_regression
 	@ bin/orm_regression
+	@ $(GPP) -std=c++11 -DLINUX -DHAVE_STDINT_H -I src -I libs -I libs/sdk/amx -I $(CONNECTOR_DIR)/include -I $(CONNECTOR_BUILD_DIR)/include tests/core_regression.cpp -L bin -l:mysql_static.so -Wl,-rpath,'$$ORIGIN' -o bin/core_regression
+	@ bin/core_regression
 
 connector:
 	@CC="gcc" CXX="g++" cmake -S $(CONNECTOR_DIR) -B $(CONNECTOR_BUILD_DIR) -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-m32" -DCMAKE_CXX_FLAGS="-m32" -DWITH_SSL=OPENSSL -DOPENSSL_USE_STATIC_LIBS=TRUE -DCLIENT_PLUGIN_CACHING_SHA2_PASSWORD=STATIC -DCLIENT_PLUGIN_SHA256_PASSWORD=STATIC
@@ -47,3 +49,9 @@ static_link: link
 clean:
 	@ rm -f *.o
 	@echo Done.
+
+# Standalone parser/config regressions; no connector or database required.
+check-input:
+	@mkdir -p bin
+	@ $(GPP) -std=c++11 -Wall -Wextra -I src tests/input_regression.cpp -o bin/input_regression
+	@ bin/input_regression

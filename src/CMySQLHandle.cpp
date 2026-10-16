@@ -31,6 +31,7 @@ CMySQLHandle::CMySQLHandle(unsigned int id) :
 
 CMySQLHandle::~CMySQLHandle() 
 {
+	m_Lifetime.reset();
 	for (unordered_map<unsigned int, CMySQLResult*>::iterator it = m_SavedResults.begin(), end = m_SavedResults.end(); it != end; it++)
 		delete it->second;
 	if (m_ActiveResultID == 0)
@@ -43,6 +44,11 @@ CMySQLHandle::~CMySQLHandle()
 
 CMySQLHandle *CMySQLHandle::Create(string host, string user, string pass, string db, size_t port, size_t pool_size, bool reconnect, const CMySQLTLSOptions& tls) 
 {
+	if (port == 0 || port > 65535 || pool_size > 64)
+	{
+		CLog::Get()->LogFunction(LOG_ERROR, "CMySQLHandle::Create", "port must be 1..65535 and pool_size must be 0..64");
+		return NULL;
+	}
 	CLog::Get()->LogFunction(LOG_DEBUG, "CMySQLHandle::Create", "creating new connection..");
 
 	CMySQLHandle *handle = NULL;

@@ -4,6 +4,7 @@
 
 
 #include <string>
+#include <memory>
 #include <boost/unordered_map.hpp>
 #include <set>
 #include <boost/function.hpp>
@@ -47,6 +48,7 @@ public:
 	static CMySQLHandle *Create(string host, string user, string pass, string db, size_t port, size_t pool_size, bool reconnect, const CMySQLTLSOptions& tls = CMySQLTLSOptions());
 	//delete function, call this instead of delete operator!
 	void Destroy();
+	std::weak_ptr<void> GetLifetime() const { return m_Lifetime; }
 	//returns MySQL handle by id
 	static inline CMySQLHandle *GetHandle(unsigned int cid) 
 	{
@@ -95,6 +97,7 @@ public:
 	}
 
 private:
+	std::shared_ptr<void> m_Lifetime = std::make_shared<int>(0);
 	CMySQLHandle(unsigned int id);
 	~CMySQLHandle();
 

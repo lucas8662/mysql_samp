@@ -10,6 +10,9 @@
 #include "CLog.h"
 
 #include "misc.h"
+#include "SqlInput.h"
+using SqlInput::Trim;
+using SqlInput::ParseUnsigned;
 
 #include <boost/bind/bind.hpp>
 #include <algorithm>
@@ -59,15 +62,6 @@ static void ClearPreparedStatements(unsigned int connectionID)
 	}
 }
 
-static string Trim(const string& value)
-{
-	const size_t begin = value.find_first_not_of(" \t\r\n");
-	if (begin == string::npos)
-		return string();
-	const size_t end = value.find_last_not_of(" \t\r\n");
-	return value.substr(begin, end - begin + 1);
-}
-
 static bool ParseBoolean(const string& value, bool& output)
 {
 	string normalized = Trim(value);
@@ -83,19 +77,6 @@ static bool ParseBoolean(const string& value, bool& output)
 		return true;
 	}
 	return false;
-}
-
-static bool ParseUnsigned(const string& value, size_t& output)
-{
-	const string normalized = Trim(value);
-	if (normalized.empty())
-		return false;
-	char* end = NULL;
-	const unsigned long parsed = strtoul(normalized.c_str(), &end, 10);
-	if (*end != '\0')
-		return false;
-	output = static_cast<size_t>(parsed);
-	return true;
 }
 
 static bool LoadConnectionFile(const string& path, string& host, string& user, string& database, string& password, size_t& port, bool& autoReconnect, size_t& poolSize, CMySQLTLSOptions& tls, string& error)
@@ -124,10 +105,38 @@ static bool LoadConnectionFile(const string& path, string& host, string& user, s
 		else if (key == "username" || key == "user") user = value;
 		else if (key == "database") database = value;
 		else if (key == "password") password = value;
-		else if (key == "server_port" || key == "port") ParseUnsigned(value, port);
-		else if (key == "auto_reconnect") ParseBoolean(value, autoReconnect);
-		else if (key == "pool_size") ParseUnsigned(value, poolSize);
-		else if (key == "ssl_enable") ParseBoolean(value, tls.Enabled);
+		else if (key == "server_port" || key == "port")
+		{
+			if (!ParseUnsigned(value, port))
+			{
+				error = "invalid value for " + key;
+				return false;
+			}
+		}
+		else if (key == "auto_reconnect")
+		{
+			if (!ParseBoolean(value, autoReconnect))
+			{
+				error = "invalid value for " + key;
+				return false;
+			}
+		}
+		else if (key == "pool_size")
+		{
+			if (!ParseUnsigned(value, poolSize))
+			{
+				error = "invalid value for " + key;
+				return false;
+			}
+		}
+		else if (key == "ssl_enable")
+		{
+			if (!ParseBoolean(value, tls.Enabled))
+			{
+				error = "invalid value for " + key;
+				return false;
+			}
+		}
 		else if (key == "ssl_key_file") tls.KeyFile = value;
 		else if (key == "ssl_cert_file") tls.CertFile = value;
 		else if (key == "ssl_ca_file") tls.CAFile = value;
@@ -149,30 +158,7 @@ static bool ParseQueriesFromFile(const string& path, vector<string>& queries)
 	if (!file)
 		return false;
 
-	string current;
-	string line;
-	while (std::getline(file, line))
-	{
-		const size_t lineComment = line.find("-- ");
-		const size_t hashComment = line.find('#');
-		const size_t commentPosition = (std::min)(lineComment, hashComment);
-		if (commentPosition != string::npos)
-			line.erase(commentPosition);
-		line.push_back(' ');
-		size_t separator = 0;
-		while ((separator = line.find(';')) != string::npos)
-		{
-			current.append(line.substr(0, separator + 1));
-			line.erase(0, separator + 1);
-			if (!Trim(current).empty())
-				queries.push_back(current);
-			current.clear();
-		}
-		current.append(line);
-	}
-	if (!Trim(current).empty())
-		queries.push_back(current);
-	return true;
+	return SqlInput::ParseQueries(file, queries);
 }
 
 
@@ -252,6 +238,7 @@ AMX_DECLARE_NATIVE(Native::orm_select)
 	COrm *OrmObject = COrm::GetOrm(orm_id);
 	CMySQLHandle *Handle = OrmObject->GetConnectionHandle();
 	CMySQLQuery *query = new CMySQLQuery;
+	CCallback::Get()->BindOwner(query, amx);
 
 	if(OrmObject->GenerateSelectQuery(query->Query))
 	{
@@ -298,6 +285,7 @@ AMX_DECLARE_NATIVE(Native::orm_update)
 	COrm *OrmObject = COrm::GetOrm(orm_id);
 	CMySQLHandle *Handle = OrmObject->GetConnectionHandle();
 	CMySQLQuery *query = new CMySQLQuery;
+	CCallback::Get()->BindOwner(query, amx);
 
 	if(OrmObject->GenerateUpdateQuery(query->Query))
 	{
@@ -349,6 +337,7 @@ AMX_DECLARE_NATIVE(Native::orm_insert)
 	COrm *OrmObject = COrm::GetOrm(orm_id);
 	CMySQLHandle *Handle = OrmObject->GetConnectionHandle();
 	CMySQLQuery *query = new CMySQLQuery;
+	CCallback::Get()->BindOwner(query, amx);
 
 	if(OrmObject->GenerateInsertQuery(query->Query))
 	{
@@ -396,6 +385,7 @@ AMX_DECLARE_NATIVE(Native::orm_delete)
 	COrm *OrmObject = COrm::GetOrm(orm_id);
 	CMySQLHandle *Handle = OrmObject->GetConnectionHandle();
 	CMySQLQuery *query = new CMySQLQuery;
+	CCallback::Get()->BindOwner(query, amx);
 
 	if(OrmObject->GenerateDeleteQuery(query->Query))
 	{
@@ -453,6 +443,7 @@ AMX_DECLARE_NATIVE(Native::orm_save)
 	COrm *OrmObject = COrm::GetOrm(orm_id);
 	CMySQLHandle *Handle = OrmObject->GetConnectionHandle();
 	CMySQLQuery *query = new CMySQLQuery;
+	CCallback::Get()->BindOwner(query, amx);
 
 
 	query->Orm.Type = OrmObject->GenerateSaveQuery(query->Query);
@@ -928,6 +919,7 @@ AMX_DECLARE_NATIVE(Native::mysql_connect)
 	
 
 	CMySQLHandle *Handle = CMySQLHandle::Create(host, user, pass != NULL ? pass : "", db, port, pool_size, auto_reconnect);
+	if (Handle == NULL) return 0;
 	Handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Connect, boost::placeholders::_1));
 
 	return static_cast<cell>(Handle->GetID());
@@ -963,6 +955,7 @@ AMX_DECLARE_NATIVE(Native::mysql_connect_ssl)
 	const bool autoReconnect = params[11] != 0;
 	const size_t poolSize = params[12];
 	CMySQLHandle *handle = CMySQLHandle::Create(host, user, password != NULL ? password : "", database, port, poolSize, autoReconnect, tls);
+	if (handle == NULL) return 0;
 	handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Connect, boost::placeholders::_1));
 	return static_cast<cell>(handle->GetID());
 }
@@ -985,6 +978,7 @@ AMX_DECLARE_NATIVE(Native::mysql_connect_file)
 		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_connect_file", "%s (%s)", error.c_str(), name.c_str());
 
 	CMySQLHandle *handle = CMySQLHandle::Create(host, user, password, database, port, poolSize, autoReconnect, tls);
+	if (handle == NULL) return 0;
 	handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Connect, boost::placeholders::_1));
 	return static_cast<cell>(handle->GetID());
 }
@@ -1107,6 +1101,7 @@ AMX_DECLARE_NATIVE(Native::mysql_pquery)
 
 	CMySQLHandle *Handle = CMySQLHandle::GetHandle(connection_id);
 	CMySQLQuery *query = new CMySQLQuery;
+	CCallback::Get()->BindOwner(query, amx);
 
 	query->Query = (query_str != NULL ? query_str : string());
 	query->Callback.Name = (cb_name != NULL ? cb_name : string());
@@ -1152,6 +1147,7 @@ AMX_DECLARE_NATIVE(Native::mysql_tquery)
 
 	CMySQLHandle *Handle = CMySQLHandle::GetHandle(connection_id);
 	CMySQLQuery *query = new CMySQLQuery;
+	CCallback::Get()->BindOwner(query, amx);
 
 	query->Query = (query_str != NULL ? query_str : string());
 	query->Callback.Name = (cb_name != NULL ? cb_name : string());
@@ -1228,7 +1224,7 @@ AMX_DECLARE_NATIVE(Native::mysql_stmt_prepare)
 	return static_cast<cell>(statementID);
 }
 
-static CPreparedStatementTemplate *GetPreparedStatement(unsigned int statementID, char *function)
+static CPreparedStatementTemplate *GetPreparedStatement(unsigned int statementID, const char *function)
 {
 	std::map<unsigned int, CPreparedStatementTemplate>::iterator it = PreparedStatements.find(statementID);
 	if (it == PreparedStatements.end())
@@ -1239,7 +1235,7 @@ static CPreparedStatementTemplate *GetPreparedStatement(unsigned int statementID
 	return &it->second;
 }
 
-static bool GetPreparedParameter(CPreparedStatementTemplate *statement, unsigned int parameterID, CMySQLQuery::s_StatementParameter *&parameter, char *function)
+static bool GetPreparedParameter(CPreparedStatementTemplate *statement, unsigned int parameterID, CMySQLQuery::s_StatementParameter *&parameter, const char *function)
 {
 	if (parameterID > 1023)
 	{
@@ -1310,6 +1306,7 @@ AMX_DECLARE_NATIVE(Native::mysql_stmt_execute)
 		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_stmt_execute", "callback parameter count does not match format specifier length");
 
 	CMySQLQuery *query = new CMySQLQuery;
+	CCallback::Get()->BindOwner(query, amx);
 	query->Query = statement->Query;
 	query->StatementParameters = statement->Parameters;
 	query->IsPreparedStatement = true;
@@ -1348,7 +1345,7 @@ AMX_DECLARE_NATIVE(Native::mysql_transaction_begin)
 	return static_cast<cell>(transactionID);
 }
 
-static CTransactionTemplate *GetTransaction(unsigned int transactionID, char *function)
+static CTransactionTemplate *GetTransaction(unsigned int transactionID, const char *function)
 {
 	std::map<unsigned int, CTransactionTemplate>::iterator it = Transactions.find(transactionID);
 	if (it == Transactions.end())
@@ -1393,6 +1390,7 @@ AMX_DECLARE_NATIVE(Native::mysql_transaction_commit)
 		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_transaction_commit", "callback parameter count does not match format specifier length");
 
 	CMySQLQuery *query = new CMySQLQuery;
+	CCallback::Get()->BindOwner(query, amx);
 	query->Query = "transaction";
 	query->TransactionQueries = it->second.Queries;
 	query->IsTransaction = true;
@@ -1445,6 +1443,7 @@ AMX_DECLARE_NATIVE(Native::mysql_tquery_file)
 	for (size_t index = 0; index < queries.size(); ++index)
 	{
 		CMySQLQuery *query = new CMySQLQuery;
+		CCallback::Get()->BindOwner(query, amx);
 		query->Query = queries[index];
 		query->Handle = handle;
 		if (index + 1 == queries.size())

@@ -60,6 +60,9 @@ public:
 
 	struct s_Callback
 	{
+		s_Callback() : Owner(NULL) {}
+		AMX *Owner;
+		std::weak_ptr<void> Lifetime;
 		stack< boost::variant<cell, string> > Params;
 		string Name;
 	} Callback;

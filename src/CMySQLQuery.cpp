@@ -14,7 +14,7 @@ CMySQLQuery::~CMySQLQuery()
 	delete Result;
 }
 
-static void SetPreparedQueryError(CMySQLQuery *query, char *log_funcname, unsigned int error_id, const char *error_str)
+static void SetPreparedQueryError(CMySQLQuery *query, const char *log_funcname, unsigned int error_id, const char *error_str)
 {
 	CLog::Get()->LogFunction(LOG_ERROR, log_funcname, "(error #%d) %s (Prepared query: \"%s\")", error_id, error_str, query->Query.c_str());
 
@@ -160,7 +160,7 @@ bool CMySQLQuery::StorePreparedResult(MYSQL_STMT *statement)
 	return true;
 }
 
-static void SetTransactionQueryError(CMySQLQuery *query, char *log_funcname, unsigned int error_id, const char *error_str, const string &failed_query)
+static void SetTransactionQueryError(CMySQLQuery *query, const char *log_funcname, unsigned int error_id, const char *error_str, const string &failed_query)
 {
 	CLog::Get()->LogFunction(LOG_ERROR, log_funcname, "(error #%d) %s (Transaction query: \"%s\")", error_id, error_str, failed_query.c_str());
 	if (!query->Unthreaded)
@@ -180,11 +180,9 @@ static void SetTransactionQueryError(CMySQLQuery *query, char *log_funcname, uns
 
 bool CMySQLQuery::ExecuteTransaction(MYSQL *mysql_connection)
 {
-	char log_funcname[64];
-	if (Unthreaded)
-		sprintf(log_funcname, "CMySQLQuery::ExecuteTransaction");
-	else
-		sprintf(log_funcname, "CMySQLQuery::ExecuteTransaction[%s]", Callback.Name.c_str());
+	const string logName = Unthreaded ? "CMySQLQuery::ExecuteTransaction"
+		: "CMySQLQuery::ExecuteTransaction[" + Callback.Name + "]";
+	const char *log_funcname = logName.c_str();
 
 	bool success = false;
 	string failed_query("START TRANSACTION");
@@ -213,15 +211,23 @@ bool CMySQLQuery::ExecuteTransaction(MYSQL *mysql_connection)
 			const my_ulonglong current_insert_id = mysql_insert_id(mysql_connection);
 			if (current_insert_id != 0)
 				insert_id = current_insert_id;
-			MYSQL_RES *result = mysql_store_result(mysql_connection);
-			if (result != NULL)
-				mysql_free_result(result);
-			while (mysql_next_result(mysql_connection) == 0)
+			int nextResult;
+			do
 			{
-				result = mysql_store_result(mysql_connection);
+				MYSQL_RES *result = mysql_store_result(mysql_connection);
 				if (result != NULL)
 					mysql_free_result(result);
-			}
+				else if (mysql_field_count(mysql_connection) != 0)
+				{
+					success = false;
+					break;
+				}
+				nextResult = mysql_next_result(mysql_connection);
+				if (nextResult > 0)
+					success = false;
+			} while (success && nextResult == 0);
+			if (!success)
+				break;
 		}
 
 		if (success)
@@ -254,11 +260,9 @@ bool CMySQLQuery::ExecuteTransaction(MYSQL *mysql_connection)
 
 bool CMySQLQuery::ExecutePrepared(MYSQL *mysql_connection)
 {
-	char log_funcname[64];
-	if (Unthreaded)
-		sprintf(log_funcname, "CMySQLQuery::ExecutePrepared");
-	else
-		sprintf(log_funcname, "CMySQLQuery::ExecutePrepared[%s]", Callback.Name.c_str());
+	const string logName = Unthreaded ? "CMySQLQuery::ExecutePrepared"
+		: "CMySQLQuery::ExecutePrepared[" + Callback.Name + "]";
+	const char *log_funcname = logName.c_str();
 
 	MYSQL_STMT *statement = mysql_stmt_init(mysql_connection);
 	if (statement == NULL)
@@ -358,11 +362,9 @@ bool CMySQLQuery::Execute(MYSQL *mysql_connection)
 		return ExecuteTransaction(mysql_connection);
 
 	bool ret_val = false;
-	char log_funcname[64];
-	if (Unthreaded)
-		sprintf(log_funcname, "CMySQLQuery::Execute");
-	else
-		sprintf(log_funcname, "CMySQLQuery::Execute[%s]", Callback.Name.c_str());
+	const string logName = Unthreaded ? "CMySQLQuery::Execute"
+		: "CMySQLQuery::Execute[" + Callback.Name + "]";
+	const char *log_funcname = logName.c_str();
 
 	CLog::Get()->LogFunction(LOG_DEBUG, log_funcname, "starting query execution");
 
