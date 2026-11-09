@@ -387,7 +387,14 @@ bool CMySQLQuery::Execute(MYSQL *mysql_connection)
 		if (Unthreaded || is_orm || Callback.Name.length() > 0)
 		{
 			if (StoreResult(mysql_connection, mysql_result) == false)
+			{
 				CLog::Get()->LogFunction(LOG_ERROR, log_funcname, "an error occured while storing the result: (error #%d) \"%s\"", mysql_errno(mysql_connection), mysql_error(mysql_connection));
+				// Never hand a half-built result (row count set, row data missing)
+				// to a callback or the cache natives.
+				delete Result;
+				Result = NULL;
+				Callback.Name.clear();
+			}
 			else
 			{
 				Result->m_Query = Query;
@@ -491,6 +498,9 @@ bool CMySQLQuery::StoreResult(MYSQL *mysql_connection, MYSQL_RES *mysql_result)
 			rowSizes[r] = rowSize;
 			memSize += rowSize;
 		}
+
+		if (num_rows == 0)
+			return true;
 
 		char ***memData = result_ptr->m_Data = static_cast<char ***>(malloc(memSize));
 		if (memData == NULL)

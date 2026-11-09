@@ -9,6 +9,8 @@
 #include <boost/lockfree/spsc_queue.hpp>
 #include <boost/function.hpp>
 #include <boost/thread/mutex.hpp>
+#include <boost/thread/condition_variable.hpp>
+#include <boost/chrono.hpp>
 #include <queue>
 
 using std::string;
@@ -48,6 +50,14 @@ public:
 	//(dis)connect to the MySQL server
 	bool Connect();
 	bool Disconnect();
+	//close and reopen the connection as one step (queued as a single job when threaded)
+	bool Reconnect();
+
+	//only meaningful for unthreaded connections or from inside the query thread
+	inline bool IsConnected() const
+	{
+		return m_IsConnected;
+	}
 
 	//escape a string to dest
 	bool EscapeString(const char *src, string &dest);
@@ -62,7 +72,10 @@ public:
 
 	inline bool QueueQuery(CMySQLQuery *query)
 	{
-		return m_QueryQueue.push(query);
+		if (!m_QueryQueue.push(query))
+			return false;
+		WakeUp();
+		return true;
 	}
 
 	inline bool operator==(CMySQLConnection &rhs)
@@ -74,6 +87,11 @@ public:
 
 private: //functions
 	void ProcessQueries();
+	void QueueFunction(const function<bool()> &func);
+	void WakeUp();
+	bool HasPendingFunctions();
+	bool HasPendingWork();
+	void ScheduleReconnect(bool failed);
 
 private: //variables
 	CMySQLConnection(string &host, string &user, string &passw, string &db, size_t port, bool auto_reconnect, bool threaded, const CMySQLTLSOptions& tls);
@@ -91,6 +109,15 @@ private: //variables
 
 	boost::mutex m_FuncQueueMtx;
 	queue<function<bool()> > m_FuncQueue;
+
+	//wakes the query thread as soon as work arrives instead of polling
+	boost::mutex m_WakeMtx;
+	boost::condition_variable m_WakeCond;
+
+	//background reconnect state; only touched by the query thread
+	bool m_ConnectRequested;
+	unsigned int m_ReconnectDelayMs;
+	boost::chrono::steady_clock::time_point m_NextReconnect;
 
 
 	//MySQL server login values

@@ -15,6 +15,7 @@ using std::ostringstream;
 #include "CMySQLHandle.h"
 #include "CMySQLResult.h"
 #include "CMySQLConnection.h"
+#include "IdAllocator.h"
 
 #include "misc.h"
 
@@ -87,16 +88,7 @@ unsigned int COrm::Create(const char *table, CMySQLHandle *connhandle, AMX *owne
 	if(connhandle == NULL)
 		return CLog::Get()->LogFunction(LOG_ERROR, "COrm::Create", "invalid connection handle");
 
-	unsigned int id = 1;
-	if(OrmHandle.size() > 0) 
-	{
-		unordered_map<unsigned int, COrm*>::iterator itHandle = OrmHandle.begin();
-		do 
-		{
-			id = itHandle->first+1;
-			++itHandle;
-		} while(OrmHandle.find(id) != OrmHandle.end());
-	}
+	const unsigned int id = GetLowestFreeId(OrmHandle);
 
 
 	COrm *OrmObject = new COrm;
@@ -105,7 +97,7 @@ unsigned int COrm::Create(const char *table, CMySQLHandle *connhandle, AMX *owne
 	OrmObject->m_MyID = id;
 	OrmObject->m_Owner = owner;
 
-	OrmHandle.insert( unordered_map<int, COrm*>::value_type(id, OrmObject) );
+	OrmHandle.insert( unordered_map<unsigned int, COrm*>::value_type(id, OrmObject) );
 	CLog::Get()->LogFunction(LOG_DEBUG, "COrm::Create", "orm object created (id: %d)", id);
 	return id;
 }

@@ -246,6 +246,24 @@ public OnTransferComplete(playerid)
 
 Call `mysql_transaction_rollback` before `mysql_transaction_commit` to discard a transaction that has not been sent to the database.
 
+### Reconexão e latência
+
+- As threads de consulta acordam assim que uma query entra na fila, em vez de
+  verificar a fila a cada 10 ms. Isso reduz a latência de cada `mysql_tquery`/
+  `mysql_pquery` e o uso de CPU quando o servidor está ocioso.
+- Com `auto_reconnect = true`, as conexões em thread (tquery, pquery, pool)
+  tentam reconectar sozinhas quando o banco está fora do ar na inicialização ou
+  quando uma reconexão falha. O intervalo começa em 1 s e dobra até 30 s; as
+  queries ficam na fila e são executadas assim que a conexão volta.
+- Erros `2006` (server gone away) e `2013` (lost connection) disparam a
+  reconexão. A query que falhou continua chamando `OnQueryError`.
+- `mysql_reconnect` agora fecha e reabre cada conexão em uma única etapa. Antes,
+  com queries pendentes, a conexão podia ficar fechada definitivamente.
+- Cada tentativa de conexão tem tempo limite de 10 s.
+- A conexão principal (usada por `mysql_query` e `mysql_escape_string`) não
+  reconecta em segundo plano, para não travar o servidor; use `mysql_reconnect`
+  se o banco estava indisponível ao iniciar.
+
 ### Segurança dos callbacks
 
 Callbacks de consultas e `OnQueryError` são executados somente no script que

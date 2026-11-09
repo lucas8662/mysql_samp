@@ -112,6 +112,7 @@ private:
 
 	CMySQLResult *m_ActiveResult;
 	unsigned int m_ActiveResultID; //ID of stored result; 0 if not stored yet
+	unsigned int m_NextResultID; //where the search for a free saved-result ID starts
 
 	unsigned int m_MyID;
 

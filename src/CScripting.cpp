@@ -11,6 +11,7 @@
 
 #include "misc.h"
 #include "SqlInput.h"
+#include "IdAllocator.h"
 using SqlInput::Trim;
 using SqlInput::ParseUnsigned;
 
@@ -1015,8 +1016,7 @@ AMX_DECLARE_NATIVE(Native::mysql_reconnect)
 
 	CMySQLHandle *Handle = CMySQLHandle::GetHandle(connection_id);
 
-	Handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Disconnect, boost::placeholders::_1));
-	Handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Connect, boost::placeholders::_1));
+	Handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Reconnect, boost::placeholders::_1));
 	return 1;
 }
 
@@ -1214,9 +1214,7 @@ AMX_DECLARE_NATIVE(Native::mysql_stmt_prepare)
 	if (queryText == NULL || *queryText == '\0')
 		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_stmt_prepare", "query must not be empty");
 
-	unsigned int statementID = NextPreparedStatementID++;
-	if (statementID == 0)
-		statementID = NextPreparedStatementID++;
+	const unsigned int statementID = GetNextFreeId(PreparedStatements, NextPreparedStatementID);
 	CPreparedStatementTemplate statement;
 	statement.ConnectionID = connectionID;
 	statement.Query = queryText;
@@ -1336,9 +1334,7 @@ AMX_DECLARE_NATIVE(Native::mysql_transaction_begin)
 	const unsigned int connectionID = params[1];
 	if (!CMySQLHandle::IsValid(connectionID))
 		return ERROR_INVALID_CONNECTION_HANDLE("mysql_transaction_begin", connectionID);
-	unsigned int transactionID = NextTransactionID++;
-	if (transactionID == 0)
-		transactionID = NextTransactionID++;
+	const unsigned int transactionID = GetNextFreeId(Transactions, NextTransactionID);
 	CTransactionTemplate transaction;
 	transaction.ConnectionID = connectionID;
 	Transactions.insert(std::make_pair(transactionID, transaction));
@@ -1814,7 +1810,11 @@ AMX_DECLARE_NATIVE(Native::mysql_get_charset)
 		return ERROR_INVALID_CONNECTION_HANDLE("mysql_get_charset", connection_id);
 
 
-	const char *charset = mysql_character_set_name(CMySQLHandle::GetHandle(connection_id)->GetMainConnection()->GetMysqlPtr());
+	MYSQL *connection = CMySQLHandle::GetHandle(connection_id)->GetMainConnection()->GetMysqlPtr();
+	if (connection == NULL)
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_get_charset", "connection is not initialized");
+
+	const char *charset = mysql_character_set_name(connection);
 	amx_SetCString(amx, params[1], charset == NULL ? "NULL" : charset, max_size);
 	return 1;
 }
@@ -1866,8 +1866,11 @@ AMX_DECLARE_NATIVE(Native::mysql_stat)
 		return ERROR_INVALID_CONNECTION_HANDLE("mysql_stat", connection_id);
 	
 
-	CMySQLHandle *Handle = CMySQLHandle::GetHandle(connection_id);
-	const char *stat_str = mysql_stat(Handle->GetMainConnection()->GetMysqlPtr());
+	CMySQLConnection *connection = CMySQLHandle::GetHandle(connection_id)->GetMainConnection();
+	if (connection->GetMysqlPtr() == NULL || !connection->IsConnected())
+		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_stat", "not connected");
+
+	const char *stat_str = mysql_stat(connection->GetMysqlPtr());
 
 	amx_SetCString(amx, params[1], stat_str == NULL ? "NULL" : stat_str, max_size);
 	return 1;

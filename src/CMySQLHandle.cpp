@@ -3,6 +3,7 @@
 #include "CMySQLConnection.h"
 #include "CLog.h"
 #include "COrm.h"
+#include "IdAllocator.h"
 
 
 #include <boost/bind/bind.hpp>
@@ -20,6 +21,7 @@ CMySQLHandle::CMySQLHandle(unsigned int id) :
 	
 	m_ActiveResult(NULL),
 	m_ActiveResultID(0),
+	m_NextResultID(1),
 	
 	m_MainConnection(NULL),
 	m_ThreadConnection(NULL),
@@ -71,16 +73,7 @@ CMySQLHandle *CMySQLHandle::Create(string host, string user, string pass, string
 
 	if(handle == NULL) 
 	{
-		unsigned int id = 1;
-		if(SQLHandle.size() > 0) 
-		{
-			unordered_map<unsigned int, CMySQLHandle*>::iterator itHandle = SQLHandle.begin();
-			do 
-			{
-				id = itHandle->first+1;
-				++itHandle;
-			} while(SQLHandle.find(id) != SQLHandle.end());
-		}
+		const unsigned int id = GetLowestFreeId(SQLHandle);
 
 
 		handle = new CMySQLHandle(id);
@@ -165,17 +158,7 @@ unsigned int CMySQLHandle::SaveActiveResult()
 		}
 		else 
 		{
-			unsigned int id = 1;
-			if(!m_SavedResults.empty()) 
-			{
-				unordered_map<unsigned int, CMySQLResult*>::iterator itHandle = m_SavedResults.begin();
-				do 
-				{
-					id = itHandle->first+1;
-					++itHandle;
-				} 
-				while(m_SavedResults.find(id) != m_SavedResults.end()); //TODO: benchmark + eventually faster lookup
-			}
+			const unsigned int id = GetNextFreeId(m_SavedResults, m_NextResultID);
 
 			m_ActiveResultID = id;
 			m_SavedResults.insert( unordered_map<unsigned int, CMySQLResult*>::value_type(id, m_ActiveResult) );
