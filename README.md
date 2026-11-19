@@ -62,6 +62,9 @@ retornados pelo servidor MySQL/MariaDB.
 - Removida a dependência antiga de `libmysqlclient_r`.
 - Corrigida a cópia do cache de resultados para usar `mysql_fetch_lengths()`,
   sem depender do layout interno do conector.
+- Corrigidas as tentativas de conexão após falha no handshake: o objeto do
+  conector é recriado para restaurar suas opções padrão, evitando o erro 5027
+  (`maximum allowed number of columns (=0)`) nas consultas após reconectar.
 - Adicionadas novas natives compatíveis com R39-6: conexão via arquivo,
   conexão TLS, mensagem de erro e execução de arquivos SQL.
 - Adicionado CMake para a compilação Windows e workflow do GitHub Actions.

@@ -65,6 +65,24 @@ extern "C" unsigned int STDCALL mysql_warning_count(MYSQL *) { return 0; }
 
 extern "C" MYSQL_STMT * STDCALL mysql_stmt_init(MYSQL *) { return NULL; }
 
+// Reproduce Connector/C's failed-handshake cleanup without a database: it
+// clears the option extension, losing mysql_init's nonzero column limit.
+static int connectAttempts;
+extern "C" MYSQL * STDCALL mysql_real_connect(MYSQL *connection, const char *,
+    const char *, const char *, const char *, unsigned int, const char *, unsigned long)
+{
+    unsigned int maxColumns = 0;
+    assert(mysql_get_option(connection, MARIADB_OPT_MAX_COLUMNS, &maxColumns) == 0);
+    assert(maxColumns > 0);
+    if (++connectAttempts <= 2)
+    {
+        maxColumns = 0;
+        assert(mysql_options(connection, MARIADB_OPT_MAX_COLUMNS, &maxColumns) == 0);
+        return NULL;
+    }
+    return connection;
+}
+
 static CMySQLQuery *Callback(CMySQLHandle *handle, AMX *owner)
 {
     auto *query = new CMySQLQuery;
@@ -109,6 +127,29 @@ int main()
     b->m_Port = 3306;
     assert(*a == *b);
     a->Destroy(); b->Destroy();
+
+    // Both initial retries and retries after a live connection must restore
+    // connector defaults, while retaining the failed handle for error natives.
+    a = CMySQLConnection::Create(host, user, password, database, 3306, true, false);
+    for (int cycle = 0; cycle != 2; ++cycle)
+    {
+        connectAttempts = 0;
+        for (int attempt = 0; attempt != 3; ++attempt)
+        {
+            if (cycle == 1 && attempt == 0)
+                a->Reconnect();
+            else
+                a->Connect();
+            assert(a->IsConnected() == (attempt == 2));
+            assert(a->GetMysqlPtr() != NULL);
+            unsigned int maxColumns = 1;
+            assert(mysql_get_option(a->GetMysqlPtr(), MARIADB_OPT_MAX_COLUMNS, &maxColumns) == 0);
+            assert((maxColumns > 0) == (attempt == 2));
+        }
+    }
+    a->Disconnect();
+    a->Destroy();
+
     assert(!CMySQLHandle::Create(host, user, password, database, 3306, static_cast<size_t>(-1), false));
     assert(!CMySQLHandle::Create(host, user, password, database, 65536, 0, false));
     assert(!CMySQLHandle::Create(host, user, password, database, 0, 0, false));

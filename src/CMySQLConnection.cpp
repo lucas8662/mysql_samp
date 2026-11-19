@@ -92,6 +92,17 @@ bool CMySQLConnection::Connect()
 	{
 		CLog::Get()->LogFunction(LOG_DEBUG, "CMySQLConnection::Connect", "establishing connection to database...");
 
+		// A failed mysql_real_connect() frees the connector's options and
+		// recreates their extension with zeroed defaults (including max_columns).
+		// Reusing that MYSQL would let the next connection succeed but reject
+		// every SELECT with error 5027. Keep the failed handle for mysql_errno /
+		// mysql_error until the next attempt, then initialize a fresh one.
+		if (!m_IsConnected && m_Connection != NULL)
+		{
+			mysql_close(m_Connection);
+			m_Connection = NULL;
+		}
+
 		if (m_Connection == NULL)
 		{
 			m_Connection = mysql_init(NULL);
@@ -103,8 +114,7 @@ bool CMySQLConnection::Connect()
 
 		m_ConnectRequested = true;
 
-		// Options are reset by the connector after a failed attempt, so they
-		// are applied again on every try.
+		// Apply connection options to the freshly initialized handle on retries.
 		unsigned int connectTimeout = CONNECT_TIMEOUT_SECONDS;
 		mysql_options(m_Connection, MYSQL_OPT_CONNECT_TIMEOUT, &connectTimeout);
 
