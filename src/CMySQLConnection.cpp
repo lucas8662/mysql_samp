@@ -334,11 +334,7 @@ void CMySQLConnection::ProcessQueries()
 					Reconnect();
 				}
 			}
-			if (!CCallback::Get()->QueueQuery(query))
-			{
-				CLog::Get()->LogFunction(LOG_ERROR, "CMySQLConnection::ProcessQueries", "callback queue is full");
-				delete query;
-			}
+			CCallback::Get()->QueueQuery(query);
 		}
 
 		unsigned int waitMs = IDLE_WAIT_MS;

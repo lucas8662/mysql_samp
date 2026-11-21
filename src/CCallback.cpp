@@ -7,7 +7,6 @@
 #include "CLog.h"
 #include "misc.h"
 
-#include <queue>
 
 
 CCallback *CCallback::m_Instance = new CCallback;
@@ -15,8 +14,20 @@ CCallback *CCallback::m_Instance = new CCallback;
 CCallback::~CCallback()
 {
 	CMySQLQuery *query = NULL;
-	while (m_CallbackQueue.pop(query))
+	while (PopQuery(query))
 		delete query;
+}
+
+// Pops one entry at a time and never holds the lock while a callback runs:
+// a callback may call mysql_close(), which re-enters ClearByHandle().
+bool CCallback::PopQuery(CMySQLQuery *&query)
+{
+	std::lock_guard<std::mutex> lock(m_CallbackQueueMtx);
+	if (m_CallbackQueue.empty())
+		return false;
+	query = m_CallbackQueue.front();
+	m_CallbackQueue.pop_front();
+	return true;
 }
 
 void CCallback::BindOwner(CMySQLQuery *query, AMX *amx)
@@ -30,7 +41,7 @@ void CCallback::BindOwner(CMySQLQuery *query, AMX *amx)
 void CCallback::ProcessCallbacks() 
 {
 	CMySQLQuery *query = NULL;
-	while(m_CallbackQueue.pop(query))
+	while(PopQuery(query))
 	{
 		// ORM destruction/script unload cancels application, not SQL already sent.
 		if (query->Orm.Cancelled() || (query->Callback.Owner != NULL && query->Callback.Lifetime.expired()))
@@ -151,21 +162,20 @@ void CCallback::FillCallbackParams(stack< boost::variant<cell, string> > &dest, 
 
 void CCallback::ClearByHandle(CMySQLHandle *handle)
 {
-	std::queue<CMySQLQuery *> tmp_queue;
-	CMySQLQuery *query = NULL;
-	while(m_CallbackQueue.pop(query))
+	std::deque<CMySQLQuery *> removed;
 	{
-		if(query->Handle != handle)
-			tmp_queue.push(query);
-		else
+		std::lock_guard<std::mutex> lock(m_CallbackQueueMtx);
+		for (std::deque<CMySQLQuery *>::iterator it = m_CallbackQueue.begin(); it != m_CallbackQueue.end();)
 		{
-			delete query;
+			if ((*it)->Handle == handle)
+			{
+				removed.push_back(*it);
+				it = m_CallbackQueue.erase(it);
+			}
+			else
+				++it;
 		}
 	}
-
-	while(!tmp_queue.empty())
-	{
-		m_CallbackQueue.push(tmp_queue.front());
-		tmp_queue.pop();
-	}
+	for (size_t i = 0; i != removed.size(); ++i)
+		delete removed[i];
 }

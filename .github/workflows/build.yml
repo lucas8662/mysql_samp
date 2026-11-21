@@ -3,7 +3,7 @@ name: Build plugin
 on:
   workflow_dispatch:
   push:
-    branches: [master]
+    branches: [main, master]
     tags: ['v*']
   pull_request:
 
@@ -38,6 +38,55 @@ jobs:
           path: |
             bin/mysql.so
             bin/mysql_static.so
+
+  integration-linux-x86:
+    name: Integration (${{ matrix.db }})
+    needs: linux-x86
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        db: ['mysql:8.4', 'mysql:5.7', 'mariadb:11.4']
+    services:
+      db:
+        image: ${{ matrix.db }}
+        env:
+          MYSQL_ROOT_PASSWORD: itpass
+          MYSQL_DATABASE: samp_test
+          MARIADB_ROOT_PASSWORD: itpass
+          MARIADB_DATABASE: samp_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h127.0.0.1 -uroot -pitpass --silent || mariadb-admin ping -h127.0.0.1 -uroot -pitpass --silent"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/download-artifact@v4
+        with:
+          name: mysql-plugin-linux-x86
+          path: bin
+      - name: Run against a live server
+        run: |
+          docker run --rm --network host -v "$GITHUB_WORKSPACE:/work" -w /work \
+            -e MYSQL_TEST_HOST=127.0.0.1 -e MYSQL_TEST_PORT=3306 -e MYSQL_TEST_USER=root \
+            -e MYSQL_TEST_PASSWORD=itpass -e MYSQL_TEST_DATABASE=samp_test \
+            ubuntu:20.04 bash -c '
+              set -e
+              dpkg --add-architecture i386
+              apt-get update -qq
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                g++-multilib make libssl1.1:i386 zlib1g:i386
+              make check-integration
+            '
+      - name: Upload plugin log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mysql-log-${{ strategy.job-index }}
+          path: bin/mysql_log.txt
+          if-no-files-found: ignore
 
   windows-x86:
     name: Windows x86

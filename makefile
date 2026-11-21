@@ -3,7 +3,7 @@ GCC ?= gcc -m32
 CONNECTOR_DIR ?= third_party/mariadb-connector-c
 CONNECTOR_BUILD_DIR ?= $(CONNECTOR_DIR)/build-linux-x86
 
-.PHONY: check-input all dynamic static connector compile link dynamic_link static_link clean check
+.PHONY: check-input check-integration all dynamic static connector compile link dynamic_link static_link clean check
 
 
 COMPILE_FLAGS = -c -O3 -fPIC -DLINUX -Wall -I libs/ -I libs/sdk/amx/ -I $(CONNECTOR_DIR)/include -I $(CONNECTOR_BUILD_DIR)/include
@@ -55,3 +55,12 @@ check-input:
 	@mkdir -p bin
 	@ $(GPP) -std=c++11 -Wall -Wextra -I src tests/input_regression.cpp -o bin/input_regression
 	@ bin/input_regression
+
+# End-to-end tests of both binaries against a live server. Run after make all.
+# Configure the server with MYSQL_TEST_HOST, MYSQL_TEST_PORT, MYSQL_TEST_USER,
+# MYSQL_TEST_PASSWORD and MYSQL_TEST_DATABASE.
+check-integration:
+	@mkdir -p bin
+	@ $(GPP) -std=c++11 -Wall -DLINUX -DHAVE_STDINT_H -I libs -I libs/sdk/amx tests/mysql_integration.cpp -ldl -pthread -o bin/mysql_integration
+	@ cd bin && ./mysql_integration ./mysql.so
+	@ cd bin && ./mysql_integration ./mysql_static.so

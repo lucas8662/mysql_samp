@@ -8,7 +8,8 @@
 #include <boost/variant.hpp>
 #include <map>
 #include <memory>
-#include <boost/lockfree/queue.hpp>
+#include <deque>
+#include <mutex>
 
 using std::stack;
 using std::string;
@@ -26,11 +27,12 @@ private:
 	static CCallback *m_Instance;
 
 
-	boost::lockfree::queue<
-		CMySQLQuery *,
-		boost::lockfree::fixed_sized<true>,
-		boost::lockfree::capacity<32648>
-	> m_CallbackQueue;
+	// Filled by every query thread (main + pool), drained by ProcessTick.
+	// Unbounded: a query that already ran on the server must never lose its
+	// callback because the server thread fell behind.
+	std::mutex m_CallbackQueueMtx;
+	std::deque<CMySQLQuery *> m_CallbackQueue;
+	bool PopQuery(CMySQLQuery *&query);
 
 	std::map<AMX *, std::shared_ptr<void> > m_AmxList;
 
@@ -54,7 +56,9 @@ public:
 
 	inline bool QueueQuery(CMySQLQuery *query)
 	{
-		return m_CallbackQueue.push(query);
+		std::lock_guard<std::mutex> lock(m_CallbackQueueMtx);
+		m_CallbackQueue.push_back(query);
+		return true;
 	}
 
 	inline void AddAmx(AMX *amx)
