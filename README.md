@@ -280,6 +280,21 @@ public OnTransferComplete(playerid)
 
 Call `mysql_transaction_rollback` before `mysql_transaction_commit` to discard a transaction that has not been sent to the database.
 
+### `mysql_tquery` x `mysql_pquery`
+
+- `mysql_tquery` usa uma única conexão em thread: as queries rodam e os
+  callbacks chegam exatamente na ordem em que foram enviadas.
+- `mysql_pquery` usa as `pool_size` conexões do pool, que compartilham uma
+  única fila: cada conexão livre pega a próxima query. Uma query lenta ocupa
+  apenas uma conexão e não atrasa as demais. Não há garantia de ordem entre
+  as `pquery`, nem de que duas delas usem a mesma sessão, então não dependa de
+  `SET @variavel`, tabelas temporárias ou transações manuais entre chamadas.
+- Se uma conexão do pool cair, as outras continuam atendendo a fila enquanto
+  ela reconecta.
+- Com `pool_size = 0`, `mysql_pquery` não falha mais: a query roda na conexão
+  do `mysql_tquery`, na mesma ordem, e um aviso é registrado no log uma vez
+  por conexão.
+
 ### Reconexão e latência
 
 - As threads de consulta acordam assim que uma query entra na fila, em vez de

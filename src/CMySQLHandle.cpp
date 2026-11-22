@@ -2,6 +2,7 @@
 #include "CMySQLResult.h"
 #include "CMySQLQuery.h"
 #include "CMySQLConnection.h"
+#include "CQueryQueue.h"
 #include "CLog.h"
 #include "COrm.h"
 #include "IdAllocator.h"
@@ -23,6 +24,8 @@ CMySQLHandle::CMySQLHandle(unsigned int id) :
 
 	m_MyID(id),
 
+	m_WarnedNoPool(false),
+
 	m_MainConnection(NULL),
 	m_ThreadConnection(NULL)
 {
@@ -37,7 +40,13 @@ CMySQLHandle::~CMySQLHandle()
 	if (m_ActiveResultID == 0)
 		delete m_ActiveResult;
 	
+	// Joins every query thread, so nothing consumes the queues any more.
 	ExecuteOnConnections([](CMySQLConnection *connection) { connection->Destroy(); });
+	m_ConnectionPool.clear();
+	if (m_ThreadQueue)
+		m_ThreadQueue->Clear();
+	if (m_PoolQueue)
+		m_PoolQueue->Clear();
 
 	CLog::Get()->LogFunction(LOG_DEBUG, "CMySQLHandle::~CMySQLHandle", "deconstructor called");
 }
@@ -52,7 +61,7 @@ CMySQLHandle *CMySQLHandle::Create(string host, string user, string pass, string
 	CLog::Get()->LogFunction(LOG_DEBUG, "CMySQLHandle::Create", "creating new connection..");
 
 	CMySQLHandle *handle = NULL;
-	CMySQLConnection *main_connection = CMySQLConnection::Create(host, user, pass, db, port, reconnect, false, tls);
+	CMySQLConnection *main_connection = CMySQLConnection::Create(host, user, pass, db, port, reconnect, nullptr, tls);
 
 	if (MySQLOptions.DuplicateConnections == false && SQLHandle.size() > 0) 
 	{
@@ -78,11 +87,15 @@ CMySQLHandle *CMySQLHandle::Create(string host, string user, string pass, string
 
 		//init connections
 		handle->m_MainConnection = main_connection;
-		handle->m_ThreadConnection = CMySQLConnection::Create(host, user, pass, db, port, reconnect, true, tls);
+		handle->m_ThreadQueue.reset(new CQueryQueue);
+		handle->m_ThreadConnection = CMySQLConnection::Create(host, user, pass, db, port, reconnect, handle->m_ThreadQueue.get(), tls);
 
-		for (size_t i = 0; i < pool_size; ++i)
-			handle->m_ConnectionPool.insert(CMySQLConnection::Create(host, user, pass, db, port, reconnect, true, tls));
-		handle->m_CurrentConPoolPos = handle->m_ConnectionPool.begin();
+		if (pool_size > 0)
+		{
+			handle->m_PoolQueue.reset(new CQueryQueue);
+			for (size_t i = 0; i < pool_size; ++i)
+				handle->m_ConnectionPool.insert(CMySQLConnection::Create(host, user, pass, db, port, reconnect, handle->m_PoolQueue.get(), tls));
+		}
 
 		SQLHandle.insert( unordered_map<unsigned int, CMySQLHandle*>::value_type(id, handle) );
 
@@ -122,24 +135,27 @@ void CMySQLHandle::ExecuteOnConnections(const std::function<void (CMySQLConnecti
 
 bool CMySQLHandle::QueueQuery(std::unique_ptr<CMySQLQuery> query, bool use_pool /*= false*/)
 {
-	CMySQLConnection *connection = NULL;
-	if (use_pool == false)
-		connection = m_ThreadConnection;
-	else if (m_ConnectionPool.size() > 0)
+	CQueryQueue *queue = NULL;
+	if (use_pool && m_PoolQueue)
+		queue = m_PoolQueue.get();
+	else if (m_ThreadConnection != NULL)
 	{
-		connection = *m_CurrentConPoolPos++;
-		if(m_CurrentConPoolPos == m_ConnectionPool.end())
-			m_CurrentConPoolPos = m_ConnectionPool.begin();
+		queue = m_ThreadQueue.get();
+		if (use_pool && !m_WarnedNoPool)
+		{
+			m_WarnedNoPool = true;
+			CLog::Get()->LogFunction(LOG_WARNING, "CMySQLHandle::QueueQuery", "connection %d has no pool (pool_size = 0); mysql_pquery runs on the threaded connection", m_MyID);
+		}
 	}
 
-	if (connection == NULL)
+	if (queue == NULL)
 	{
-		CLog::Get()->LogFunction(LOG_ERROR, "CMySQLHandle::QueueQuery", "no %s connection available", use_pool ? "pool" : "threaded");
+		CLog::Get()->LogFunction(LOG_ERROR, "CMySQLHandle::QueueQuery", "no threaded connection available");
 		return false;
 	}
 	// Count before queueing: the query thread decrements as soon as it runs it.
 	m_QueryCounter++;
-	connection->QueueQuery(std::move(query));
+	queue->Push(std::move(query));
 	return true;
 }
 

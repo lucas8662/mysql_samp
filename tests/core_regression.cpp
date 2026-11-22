@@ -112,8 +112,8 @@ int main()
     assert(executions == 2 && lifetime.expired());
 
     std::string host("host"), user("user"), password, database("db");
-    auto *a = CMySQLConnection::Create(host, user, password, database, 3306, false, false);
-    auto *b = CMySQLConnection::Create(host, user, password, database, 3307, false, false);
+    auto *a = CMySQLConnection::Create(host, user, password, database, 3306, false);
+    auto *b = CMySQLConnection::Create(host, user, password, database, 3307, false);
     assert(!(*a == *b));
     TestAccess::Port(b) = 3306;
     assert(*a == *b);
@@ -121,7 +121,7 @@ int main()
 
     // Both initial retries and retries after a live connection must restore
     // connector defaults, while retaining the failed handle for error natives.
-    a = CMySQLConnection::Create(host, user, password, database, 3306, true, false);
+    a = CMySQLConnection::Create(host, user, password, database, 3306, true);
     for (int cycle = 0; cycle != 2; ++cycle)
     {
         connectAttempts = 0;

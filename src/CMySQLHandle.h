@@ -11,6 +11,8 @@
 #include <unordered_map>
 #include "CMySQLConnection.h"
 
+class CQueryQueue;
+
 using std::string;
 using std::unordered_map;
 using std::set;
@@ -33,7 +35,9 @@ public:
 		return m_MainConnection;
 	}
 	void ExecuteOnConnections(const std::function<void (CMySQLConnection *)> &func);
-	//takes ownership; on failure the query is discarded
+	//takes ownership; on failure the query is discarded. use_pool queries go
+	//to the pool's shared queue, or to the threaded connection (in order)
+	//when the handle has no pool.
 	bool QueueQuery(std::unique_ptr<CMySQLQuery> query, bool use_pool = false);
 
 
@@ -116,10 +120,15 @@ private:
 
 	unsigned int m_MyID;
 
+	// Declared before the connections that consume them; the destructor
+	// stops every connection before releasing the queues.
+	std::unique_ptr<CQueryQueue> m_ThreadQueue; //single consumer: strict FIFO
+	std::unique_ptr<CQueryQueue> m_PoolQueue; //shared by every pool connection
+	bool m_WarnedNoPool; //pquery fallback is logged once per handle
+
 	CMySQLConnection *m_MainConnection; //only used in main thread
 	CMySQLConnection *m_ThreadConnection; //for normal threaded queries
 	set<CMySQLConnection *> m_ConnectionPool;
-	set<CMySQLConnection *>::iterator m_CurrentConPoolPos;
 };
 
 

@@ -308,6 +308,41 @@ int main(int argc, char **argv)
         CHECK(Call("mysql_pquery", { h, Str("INSERT INTO it_test (name, score) VALUES ('pool', 0)"), Str("OnPool"), Str("") }) == 1);
     CHECK(TickUntil([&] { return poolCalls == 20; }));
 
+    // --- a slow pquery does not hold back the rest of the pool --------------
+    // With round-robin the second fast query was assigned to the connection
+    // busy with SLEEP(2); the shared queue lets the free connection take both.
+    {
+        int slowDone = 0, fastDone = 0, fastBeforeSlow = 0;
+        Public("OnPoolSlow", [&](const vector<cell> &) { ++slowDone; });
+        Public("OnPoolFast", [&](const vector<cell> &) { ++fastDone; if (slowDone == 0) ++fastBeforeSlow; });
+        CHECK(Call("mysql_pquery", { h, Str("SELECT SLEEP(2)"), Str("OnPoolSlow"), Str("") }) == 1);
+        CHECK(Call("mysql_pquery", { h, Str("SELECT 1"), Str("OnPoolFast"), Str("") }) == 1);
+        CHECK(Call("mysql_pquery", { h, Str("SELECT 2"), Str("OnPoolFast"), Str("") }) == 1);
+        CHECK(TickUntil([&] { return slowDone == 1 && fastDone == 2; }));
+        CHECK(fastBeforeSlow == 2);
+    }
+
+    // --- pool_size = 0: pquery falls back to the threaded connection -------
+    // It shares the tquery queue, so the order with tquery is kept.
+    {
+        // Same credentials as h: without this the existing handle comes back.
+        Call("mysql_option", { 0 /* DUPLICATE_CONNECTIONS */, 1 });
+        const cell np = Call("mysql_connect", { Str(host), Str(Env("MYSQL_TEST_USER", "root")),
+            Str(Env("MYSQL_TEST_DATABASE", "samp_test")), Str(Env("MYSQL_TEST_PASSWORD", "")),
+            port, 1, 0 });
+        Call("mysql_option", { 0 /* DUPLICATE_CONNECTIONS */, 0 });
+        REQUIRE(np > 0 && np != h);
+        vector<cell> order;
+        Public("OnNoPool", [&](const vector<cell> &args) { order.push_back(args.at(0)); });
+        CHECK(Call("mysql_tquery", { np, Str("SELECT 1"), Str("OnNoPool"), Str("d"), Ref(1) }) == 1);
+        CHECK(Call("mysql_pquery", { np, Str("SELECT SLEEP(0.2)"), Str("OnNoPool"), Str("d"), Ref(2) }) == 1);
+        CHECK(Call("mysql_tquery", { np, Str("SELECT 3"), Str("OnNoPool"), Str("d"), Ref(3) }) == 1);
+        CHECK(Call("mysql_pquery", { np, Str("SELECT 4"), Str("OnNoPool"), Str("d"), Ref(4) }) == 1);
+        CHECK(TickUntil([&] { return order.size() == 4; }));
+        CHECK((order == vector<cell>{ 1, 2, 3, 4 }));
+        CHECK(Call("mysql_close", { np }) == 1);
+    }
+
     // --- prepared statements ----------------------------------------------
     int stmtCalls = 0;
     Public("OnStmt", [&](const vector<cell> &) {
@@ -382,6 +417,6 @@ int main(int argc, char **argv)
         std::fprintf(stderr, "MySQL integration: %d check(s) failed\n", failures);
         return 1;
     }
-    std::puts("MySQL integration passed: unreachable server, connect, format, tquery/pquery, cache, errors, stmt, transactions, reconnect, callback burst");
+    std::puts("MySQL integration passed: unreachable server, connect, format, tquery/pquery, pool queue, pquery fallback, cache, errors, stmt, transactions, reconnect, callback burst");
     return 0;
 }

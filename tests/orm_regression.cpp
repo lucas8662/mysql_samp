@@ -57,7 +57,7 @@ int main()
     assert(mysql_library_init(0, NULL, NULL) == 0);
     CMySQLHandle *handle = TestAccess::NewHandle(0);
     string host, user, password, database;
-    TestAccess::MainConnection(handle) = CMySQLConnection::Create(host, user, password, database, 3306, false, false);
+    TestAccess::MainConnection(handle) = CMySQLConnection::Create(host, user, password, database, 3306, false);
     auto *connection = TestAccess::MainConnection(handle);
     TestAccess::Mysql(connection) = mysql_init(NULL);
     assert(TestAccess::Mysql(connection));

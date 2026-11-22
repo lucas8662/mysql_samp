@@ -5,8 +5,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
-#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -25,6 +23,7 @@ using std::string;
 
 
 class CMySQLQuery;
+class CQueryQueue;
 
 struct CMySQLTLSOptions
 {
@@ -41,7 +40,10 @@ struct CMySQLTLSOptions
 class CMySQLConnection
 {
 public:
-	static CMySQLConnection *Create(string &host, string &user, string &passwd, string &db, size_t port, bool auto_reconnect, bool threaded = true, const CMySQLTLSOptions& tls = CMySQLTLSOptions());
+	// With a queue the connection gets its own thread and runs the queries
+	// taken from it; without one it is unthreaded (the main connection).
+	// The queue must outlive the connection.
+	static CMySQLConnection *Create(string &host, string &user, string &passwd, string &db, size_t port, bool auto_reconnect, CQueryQueue *queue = nullptr, const CMySQLTLSOptions& tls = CMySQLTLSOptions());
 	void Destroy();
 
 	//(dis)connect to the MySQL server
@@ -67,9 +69,6 @@ public:
 		return m_Connection;
 	}
 
-	// Unbounded: the server thread never has to drop a script's query.
-	void QueueQuery(std::unique_ptr<CMySQLQuery> query);
-
 	inline bool operator==(CMySQLConnection &rhs)
 	{
 		return (rhs.m_Port == m_Port && rhs.m_Host.compare(m_Host) == 0 && rhs.m_User.compare(m_User) == 0 && rhs.m_Database.compare(m_Database) == 0 && rhs.m_Passw.compare(m_Passw) == 0
@@ -81,7 +80,6 @@ public:
 private: //functions
 	void ProcessQueries();
 	void QueueFunction(std::function<bool()> func);
-	std::unique_ptr<CMySQLQuery> PopQuery();
 	//true when called from another thread than this connection's query thread
 	bool MustQueue() const
 	{
@@ -89,31 +87,24 @@ private: //functions
 	}
 	void WakeUp();
 	bool HasPendingFunctions();
-	bool HasQueuedQueries()
-	{
-		std::lock_guard<std::mutex> lockguard(m_QueryQueueMtx);
-		return !m_QueryQueue.empty();
-	}
-	bool HasPendingWork();
+	//called with the query queue locked
+	bool HasPendingWork(bool has_queries);
 	void ScheduleReconnect(bool failed);
 
 private: //variables
-	CMySQLConnection(string &host, string &user, string &passw, string &db, size_t port, bool auto_reconnect, bool threaded, const CMySQLTLSOptions& tls);
+	CMySQLConnection(string &host, string &user, string &passw, string &db, size_t port, bool auto_reconnect, CQueryQueue *queue, const CMySQLTLSOptions& tls);
 	~CMySQLConnection();
 
 
 	std::thread m_QueryThread; //not joinable for unthreaded connections
 	std::atomic<bool> m_QueryThreadRunning;
 
-	std::mutex m_QueryQueueMtx;
-	std::deque<std::unique_ptr<CMySQLQuery> > m_QueryQueue;
+	//queries this connection's thread runs; owned by the handle, possibly
+	//shared with other connections (pool). NULL for unthreaded connections.
+	CQueryQueue *m_Queue;
 
 	std::mutex m_FuncQueueMtx;
 	std::queue<std::function<bool()> > m_FuncQueue;
-
-	//wakes the query thread as soon as work arrives instead of polling
-	std::mutex m_WakeMtx;
-	std::condition_variable m_WakeCond;
 
 	//background reconnect state; only touched by the query thread
 	bool m_ConnectRequested;

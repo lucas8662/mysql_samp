@@ -1,5 +1,6 @@
 #include "CMySQLConnection.h"
 #include "CMySQLQuery.h"
+#include "CQueryQueue.h"
 #include "CMySQLResult.h"
 #include "CCallback.h"
 #include "CLog.h"
@@ -22,9 +23,9 @@ static const unsigned int CONNECT_TIMEOUT_SECONDS = 10;
 static const unsigned int IDLE_WAIT_MS = 500;
 
 
-CMySQLConnection *CMySQLConnection::Create(string &host, string &user, string &passwd, string &db, size_t port, bool auto_reconnect, bool threaded /*= true*/, const CMySQLTLSOptions& tls)
+CMySQLConnection *CMySQLConnection::Create(string &host, string &user, string &passwd, string &db, size_t port, bool auto_reconnect, CQueryQueue *queue /*= nullptr*/, const CMySQLTLSOptions& tls)
 {
-	return new CMySQLConnection(host, user, passwd, db, port, auto_reconnect, threaded, tls);
+	return new CMySQLConnection(host, user, passwd, db, port, auto_reconnect, queue, tls);
 }
 
 void CMySQLConnection::Destroy()
@@ -32,9 +33,10 @@ void CMySQLConnection::Destroy()
 	delete this;
 }
 
-CMySQLConnection::CMySQLConnection(string &host, string &user, string &passw, string &db, size_t port, bool auto_reconnect, bool threaded, const CMySQLTLSOptions& tls)
+CMySQLConnection::CMySQLConnection(string &host, string &user, string &passw, string &db, size_t port, bool auto_reconnect, CQueryQueue *queue, const CMySQLTLSOptions& tls)
 	: 
 	m_QueryThreadRunning(true),
+	m_Queue(queue),
 
 	m_ConnectRequested(false),
 	m_ReconnectDelayMs(RECONNECT_DELAY_MIN_MS),
@@ -51,7 +53,7 @@ CMySQLConnection::CMySQLConnection(string &host, string &user, string &passw, st
 
 	m_Connection(NULL)
 {
-	if(threaded)
+	if(m_Queue != NULL)
 		m_QueryThread = std::thread(&CMySQLConnection::ProcessQueries, this);
 }
 
@@ -65,7 +67,9 @@ CMySQLConnection::~CMySQLConnection()
 		m_QueryThreadRunning = false;
 		WakeUp();
 		m_QueryThread.join();
-		m_QueryQueue.clear();
+		// Queries still queued belong to the handle's queue, which may be
+		// shared with other pool connections; the handle discards them once
+		// all of its connections are gone.
 	}
 
 	if (m_Connection != NULL)
@@ -241,25 +245,6 @@ bool CMySQLConnection::SetCharset(string charset)
 	return true;
 }
 
-void CMySQLConnection::QueueQuery(std::unique_ptr<CMySQLQuery> query)
-{
-	{
-		std::lock_guard<std::mutex> lockguard(m_QueryQueueMtx);
-		m_QueryQueue.push_back(std::move(query));
-	}
-	WakeUp();
-}
-
-std::unique_ptr<CMySQLQuery> CMySQLConnection::PopQuery()
-{
-	std::lock_guard<std::mutex> lockguard(m_QueryQueueMtx);
-	if (m_QueryQueue.empty())
-		return nullptr;
-	std::unique_ptr<CMySQLQuery> query = std::move(m_QueryQueue.front());
-	m_QueryQueue.pop_front();
-	return query;
-}
-
 void CMySQLConnection::QueueFunction(std::function<bool()> func)
 {
 	{
@@ -271,12 +256,9 @@ void CMySQLConnection::QueueFunction(std::function<bool()> func)
 
 void CMySQLConnection::WakeUp()
 {
-	// Taking the mutex orders this notification after the worker's predicate
-	// check, so a wake-up cannot be lost between the check and the wait.
-	{
-		std::lock_guard<std::mutex> lockguard(m_WakeMtx);
-	}
-	m_WakeCond.notify_one();
+	// The query thread only ever sleeps on its queue's condition variable.
+	if (m_Queue != NULL)
+		m_Queue->Notify();
 }
 
 bool CMySQLConnection::HasPendingFunctions()
@@ -285,11 +267,11 @@ bool CMySQLConnection::HasPendingFunctions()
 	return !m_FuncQueue.empty();
 }
 
-bool CMySQLConnection::HasPendingWork()
+bool CMySQLConnection::HasPendingWork(bool has_queries)
 {
 	return !m_QueryThreadRunning
 		|| HasPendingFunctions()
-		|| (m_IsConnected && HasQueuedQueries());
+		|| (m_IsConnected && has_queries);
 }
 
 void CMySQLConnection::ScheduleReconnect(bool failed)
@@ -335,9 +317,12 @@ void CMySQLConnection::ProcessQueries()
 			Connect();
 		}
 
-		while(m_QueryThreadRunning && m_IsConnected)
+		// Stop between queries when a job for this connection arrives
+		// (charset, reconnect), so it is not delayed until the shared queue
+		// runs dry.
+		while(m_QueryThreadRunning && m_IsConnected && !HasPendingFunctions())
 		{
-			std::unique_ptr<CMySQLQuery> query = PopQuery();
+			std::unique_ptr<CMySQLQuery> query = m_Queue->TryPop();
 			if (!query)
 				break;
 			if(query->Execute(m_Connection) == false)
@@ -368,8 +353,8 @@ void CMySQLConnection::ProcessQueries()
 
 		if (waitMs > 0)
 		{
-			std::unique_lock<std::mutex> lock(m_WakeMtx);
-			m_WakeCond.wait_for(lock, chrono::milliseconds(waitMs), [this] { return HasPendingWork(); });
+			m_Queue->WaitFor(chrono::milliseconds(waitMs),
+				[this](bool has_queries) { return HasPendingWork(has_queries); });
 		}
 	}
 	mysql_thread_end();
