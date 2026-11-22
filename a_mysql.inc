@@ -1,5 +1,5 @@
 /**
- * MySQL plugin R39-6
+ * MySQL plugin v1.0.0 (R39 API)
  */
 
 

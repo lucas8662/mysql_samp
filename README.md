@@ -1,6 +1,6 @@
 # Plugin MySQL para SA:MP / open.mp
 
-Plugin R39-6 para Pawn, atualizado para usar o **MariaDB Connector/C 3.4.11**.
+Plugin MySQL **v1.0.0** para Pawn, compatível com a API R39-6, atualizado para usar o **MariaDB Connector/C 3.4.11**.
 Ele mantém as mesmas natives e a mesma include `a_mysql.inc`, portanto os
 gamemodes existentes não precisam ser alterados.
 

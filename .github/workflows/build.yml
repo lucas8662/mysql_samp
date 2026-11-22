@@ -183,3 +183,40 @@ jobs:
         with:
           name: mysql-plugin-windows-x86
           path: build/windows/Release/mysql.dll
+
+  release:
+    name: Publish release
+    # Version tags only (v1.0.0, ...), and only when every check passed.
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [linux-x86, integration-linux-x86, sanitizers, windows-x86]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mysql-plugin-linux-x86
+          path: release/linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: mysql-plugin-windows-x86
+          path: release/windows
+      - name: Package
+        run: |
+          cd release
+          (cd linux && zip -9 ../mysql-plugin-linux-x86.zip mysql.so mysql_static.so)
+          (cd windows && zip -9 ../mysql-plugin-windows-x86.zip mysql.dll)
+          cp ../a_mysql.inc .
+          sha256sum mysql-plugin-linux-x86.zip mysql-plugin-windows-x86.zip a_mysql.inc > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          notes=release-notes/$TAG.md
+          if [ -f "$notes" ]; then set -- --notes-file "$notes"; else set -- --generate-notes; fi
+          gh release create "$TAG" --title "$TAG (R39 Plus)" --verify-tag "$@" \
+            release/mysql-plugin-linux-x86.zip release/mysql-plugin-windows-x86.zip \
+            release/a_mysql.inc release/SHA256SUMS.txt
