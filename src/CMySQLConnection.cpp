@@ -22,7 +22,7 @@ static const unsigned int CONNECT_TIMEOUT_SECONDS = 10;
 static const unsigned int IDLE_WAIT_MS = 500;
 
 
-CMySQLConnection *CMySQLConnection::Create(string &host, string &user, string &passwd, string &db, unsigned int port, bool auto_reconnect, bool threaded /*= true*/, const CMySQLTLSOptions& tls)
+CMySQLConnection *CMySQLConnection::Create(string &host, string &user, string &passwd, string &db, size_t port, bool auto_reconnect, bool threaded /*= true*/, const CMySQLTLSOptions& tls)
 {
 	return new CMySQLConnection(host, user, passwd, db, port, auto_reconnect, threaded, tls);
 }

@@ -179,6 +179,22 @@ MYSQL_TEST_PASSWORD=senha MYSQL_TEST_DATABASE=samp_test \
 
 O teste cria e apaga a tabela `it_test`; use um banco descartável.
 
+### Sanitizers
+
+`tests/run-sanitizers.sh` compila o plugin e os testes instrumentados e roda o
+`ctest` (com as mesmas variáveis `MYSQL_TEST_*` para incluir o banco real):
+
+```bash
+tests/run-sanitizers.sh address   # ASan + UBSan + LeakSanitizer, 32 bits (GCC)
+tests/run-sanitizers.sh thread    # ThreadSanitizer, build de teste 64 bits (Clang)
+```
+
+O ThreadSanitizer não existe em 32 bits, por isso o modo `thread` usa
+`-DPLUGIN_NATIVE_ARCH=ON`; esse binário serve só para teste. Em containers, o
+modo `address` precisa de `--cap-add SYS_PTRACE` para o detector de vazamentos.
+Em kernels recentes, se o TSan falhar ao iniciar, rode
+`sudo sysctl vm.mmap_rnd_bits=28`.
+
 ### Segurança e comportamento do ORM
 
 - As natives `orm_*` mantêm as mesmas assinaturas.
@@ -218,6 +234,7 @@ request, tag iniciada por `v` ou execução manual. Ele:
 
 - compila `mysql.so` e `mysql_static.so` em Ubuntu 20.04 e roda o `ctest`;
 - roda o teste com banco real contra MySQL 8.4, MySQL 5.7 e MariaDB 11.4;
+- roda toda a suíte com AddressSanitizer/UBSan e com ThreadSanitizer;
 - compila `mysql.dll` para Windows x86;
 - publica os binários como artefatos.
 

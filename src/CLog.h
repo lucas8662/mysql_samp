@@ -86,15 +86,16 @@ private:
 	void ProcessLog();
 	void QueueLog(m_SLogData &&logData);
 
-	string m_LogFileName;
-	unsigned int m_LogType;
-	unsigned int m_LogLevel;
+	string m_LogFileName; //guarded by m_TextLogMtx once threads exist
+	std::atomic<unsigned int> m_LogType;
+	std::atomic<unsigned int> m_LogLevel;
 
 	std::thread m_LogThread; //HTML log writer, started on demand
 	std::atomic<bool> m_LogThreadAlive;
 	std::thread::id m_MainThreadID;
 
 	std::mutex m_LogQueueMtx;
+	std::mutex m_TextLogMtx; //serializes writes to the text log file
 	std::deque<m_SLogData> m_LogQueue;
 };
 

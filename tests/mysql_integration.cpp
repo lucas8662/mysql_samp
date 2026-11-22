@@ -214,6 +214,22 @@ int main(int argc, char **argv)
     REQUIRE(amxLoad(&amx) == AMX_ERR_NONE);
     Call("mysql_log", { 1 | 2, 1 }); // LOG_ERROR | LOG_WARNING, text log
 
+    // --- unreachable server ----------------------------------------------
+    // The main, query and pool connections all fail at once and log from
+    // their own threads; the handle must still close cleanly.
+    {
+        const cell bad = Call("mysql_connect", { Str("127.0.0.1"), Str("nobody"), Str("nothing"), Str("x"),
+            1 /* closed port */, 0 /* no auto-reconnect */, 2 });
+        REQUIRE(bad > 0);
+        CHECK(Call("mysql_errno", { bad }) != 0);
+        for (int i = 0; i != 50; ++i) // let the worker threads attempt their connections
+        {
+            processTick();
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        CHECK(Call("mysql_close", { bad }) == 1);
+    }
+
     // --- connect -----------------------------------------------------------
     const string host = Env("MYSQL_TEST_HOST", "127.0.0.1");
     const int port = std::atoi(Env("MYSQL_TEST_PORT", "3306").c_str());
@@ -226,6 +242,9 @@ int main(int argc, char **argv)
         const cell buf = Alloc(256);
         Call("mysql_error", { buf, h, 256 });
         std::fprintf(stderr, "connection failed: %s\n", ReadStr(buf).c_str());
+        Call("mysql_close", { h });
+        amxUnload(&amx);
+        unload();
         return 1;
     }
     const cell buf = Alloc(512);
@@ -363,6 +382,6 @@ int main(int argc, char **argv)
         std::fprintf(stderr, "MySQL integration: %d check(s) failed\n", failures);
         return 1;
     }
-    std::puts("MySQL integration passed: connect, format, tquery/pquery, cache, errors, stmt, transactions, reconnect, callback burst");
+    std::puts("MySQL integration passed: unreachable server, connect, format, tquery/pquery, cache, errors, stmt, transactions, reconnect, callback burst");
     return 0;
 }

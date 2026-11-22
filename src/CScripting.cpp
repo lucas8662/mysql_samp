@@ -232,7 +232,7 @@ AMX_DECLARE_NATIVE(Native::orm_select)
 	if(!COrm::IsValid(orm_id))
 		return ERROR_INVALID_ORM_ID("orm_select", orm_id);
 
-	if(cb_format != NULL && strlen(cb_format) != ( (params[0]/4) - ConstParamCount ))
+	if(cb_format != NULL && strlen(cb_format) != static_cast<size_t>((params[0] / 4) - ConstParamCount))
 		return CLog::Get()->LogFunction(LOG_ERROR, "orm_select", "callback parameter count does not match format specifier length");
 
 
@@ -327,7 +327,7 @@ AMX_DECLARE_NATIVE(Native::orm_insert)
 	if(!COrm::IsValid(orm_id))
 		return ERROR_INVALID_ORM_ID("orm_insert", orm_id);
 
-	if(cb_format != NULL && strlen(cb_format) != ( (params[0]/4) - ConstParamCount ))
+	if(cb_format != NULL && strlen(cb_format) != static_cast<size_t>((params[0] / 4) - ConstParamCount))
 		return CLog::Get()->LogFunction(LOG_ERROR, "orm_insert", "callback parameter count does not match format specifier length");
 
 
@@ -427,7 +427,7 @@ AMX_DECLARE_NATIVE(Native::orm_save)
 	if(!COrm::IsValid(orm_id))
 		return ERROR_INVALID_ORM_ID("orm_save", orm_id);
 
-	if(cb_format != NULL && strlen(cb_format) != ( (params[0]/4) - ConstParamCount ))
+	if(cb_format != NULL && strlen(cb_format) != static_cast<size_t>((params[0] / 4) - ConstParamCount))
 		return CLog::Get()->LogFunction(LOG_ERROR, "orm_save", "callback parameter count does not match format specifier length");
 
 
@@ -1083,7 +1083,7 @@ AMX_DECLARE_NATIVE(Native::mysql_pquery)
 	if (!CMySQLHandle::IsValid(connection_id))
 		return ERROR_INVALID_CONNECTION_HANDLE("mysql_pquery", connection_id);
 
-	if (cb_format != NULL && strlen(cb_format) != ((params[0] / 4) - ConstParamCount))
+	if (cb_format != NULL && strlen(cb_format) != static_cast<size_t>((params[0] / 4) - ConstParamCount))
 		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_pquery", "callback parameter count does not match format specifier length (Query: \"%s\")", query_str ? query_str : "");
 
 
@@ -1128,7 +1128,7 @@ AMX_DECLARE_NATIVE(Native::mysql_tquery)
 	if(!CMySQLHandle::IsValid(connection_id))
 		return ERROR_INVALID_CONNECTION_HANDLE("mysql_tquery", connection_id);
 
-	if (cb_format != NULL && strlen(cb_format) != ((params[0] / 4) - ConstParamCount))
+	if (cb_format != NULL && strlen(cb_format) != static_cast<size_t>((params[0] / 4) - ConstParamCount))
 		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_tquery", "callback parameter count does not match format specifier length (Query: \"%s\")", query_str ? query_str : "");
 
 
@@ -1286,7 +1286,7 @@ AMX_DECLARE_NATIVE(Native::mysql_stmt_execute)
 	const char *callbackFormat = NULL;
 	amx_StrParam(amx, params[2], callbackName);
 	amx_StrParam(amx, params[3], callbackFormat);
-	if (callbackFormat != NULL && strlen(callbackFormat) != ((params[0] / 4) - ConstParamCount))
+	if (callbackFormat != NULL && strlen(callbackFormat) != static_cast<size_t>((params[0] / 4) - ConstParamCount))
 		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_stmt_execute", "callback parameter count does not match format specifier length");
 
 	std::unique_ptr<CMySQLQuery> query(new CMySQLQuery);
@@ -1367,7 +1367,7 @@ AMX_DECLARE_NATIVE(Native::mysql_transaction_commit)
 	const char *callbackFormat = NULL;
 	amx_StrParam(amx, params[2], callbackName);
 	amx_StrParam(amx, params[3], callbackFormat);
-	if (callbackFormat != NULL && strlen(callbackFormat) != ((params[0] / 4) - ConstParamCount))
+	if (callbackFormat != NULL && strlen(callbackFormat) != static_cast<size_t>((params[0] / 4) - ConstParamCount))
 		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_transaction_commit", "callback parameter count does not match format specifier length");
 
 	std::unique_ptr<CMySQLQuery> query(new CMySQLQuery);
@@ -1411,7 +1411,7 @@ AMX_DECLARE_NATIVE(Native::mysql_tquery_file)
 		return ERROR_INVALID_CONNECTION_HANDLE("mysql_tquery_file", connectionID);
 	if (fileName == NULL || string(fileName).find("..") != string::npos || string(fileName).find_first_of("/\\") != string::npos)
 		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_tquery_file", "file must be inside scriptfiles");
-	if (callbackFormat != NULL && strlen(callbackFormat) != ((params[0] / 4) - ConstParamCount))
+	if (callbackFormat != NULL && strlen(callbackFormat) != static_cast<size_t>((params[0] / 4) - ConstParamCount))
 		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_tquery_file", "callback parameter count does not match format specifier length");
 
 	vector<string> queries;

@@ -1,8 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 
+# Testing only: build for the host architecture, e.g. 64-bit for
+# ThreadSanitizer, which has no 32-bit runtime. Servers need the 32-bit plugin.
+option(PLUGIN_NATIVE_ARCH "Build for the host architecture instead of 32-bit (testing only)" OFF)
+
 # Must be chosen before project() so compiler checks and library searches
 # already target 32-bit.
-if(CMAKE_HOST_UNIX AND NOT APPLE AND NOT CMAKE_TOOLCHAIN_FILE)
+if(CMAKE_HOST_UNIX AND NOT APPLE AND NOT CMAKE_TOOLCHAIN_FILE AND NOT PLUGIN_NATIVE_ARCH)
     set(CMAKE_TOOLCHAIN_FILE ${CMAKE_CURRENT_SOURCE_DIR}/cmake/linux-x86.cmake)
 endif()
 
@@ -25,7 +29,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-if(UNIX AND NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
+if(UNIX AND NOT CMAKE_SIZEOF_VOID_P EQUAL 4 AND NOT PLUGIN_NATIVE_ARCH)
     # Happens when -DCMAKE_C_FLAGS/-DCMAKE_CXX_FLAGS replace the toolchain's -m32.
     message(FATAL_ERROR "The plugin must be 32-bit like the SA-MP/open.mp server. "
         "Add -m32 to any CMAKE_C_FLAGS/CMAKE_CXX_FLAGS/linker flags you pass.")
@@ -113,9 +117,13 @@ else()
         LIBRARY_OUTPUT_DIRECTORY ${PLUGIN_OUTPUT_DIR})
     target_link_libraries(mysql_plugin_static PRIVATE mariadbclient dl pthread rt)
 
-    foreach(target mysql_plugin mysql_plugin_static)
-        target_link_options(${target} PRIVATE -Wl,-z,defs)
-    endforeach()
+    # Catch unresolved symbols at link time. Skipped for sanitizer builds:
+    # with Clang the sanitizer runtime lives in the executable that loads us.
+    if(NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize")
+        foreach(target mysql_plugin mysql_plugin_static)
+            target_link_options(${target} PRIVATE -Wl,-z,defs)
+        endforeach()
+    endif()
 endif()
 
 # --- Tests (Linux) -------------------------------------------------------------

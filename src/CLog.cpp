@@ -8,6 +8,16 @@
 
 CLog *CLog::m_Instance = NULL;
 
+// localtime() returns a shared static buffer; every connection thread logs.
+static void LocalTime(time_t value, struct tm &out)
+{
+#ifdef WIN32
+	localtime_s(&out, &value);
+#else
+	localtime_r(&value, &out);
+#endif
+}
+
 static string FormatLogMessage(const char *format, va_list arguments)
 {
 	if (format == NULL)
@@ -60,14 +70,21 @@ static const char *LogLevelName(unsigned int level)
 
 void CLog::ProcessLog()
 {
-	FILE *logFile = fopen(m_LogFileName.c_str(), "w");
+	string fileName;
+	{
+		std::lock_guard<std::mutex> lock(m_TextLogMtx);
+		fileName = m_LogFileName;
+	}
+	FILE *logFile = fopen(fileName.c_str(), "w");
 	if (logFile == NULL)
 		return;
 
 	char startTime[32];
 	time_t rawTime;
 	time(&rawTime);
-	strftime(startTime, sizeof(startTime), "%H:%M, %d.%m.%Y", localtime(&rawTime));
+	struct tm startTm;
+	LocalTime(rawTime, startTm);
+	strftime(startTime, sizeof(startTime), "%H:%M, %d.%m.%Y", &startTm);
 	fprintf(logFile,
 		"<!doctype html><html><head><meta charset=\"utf-8\"><title>MySQL Plugin log</title>"
 		"<style>body{font-family:Arial;background:#ddd}table{border-collapse:collapse;width:100%%}th,td{border:1px solid #333;padding:4px;word-break:break-word}.ERROR{background:#f99}.WARNING{background:#fc9}.DEBUG{background:#9f9}</style>"
@@ -99,7 +116,9 @@ void CLog::ProcessLog()
 				char timeform[16];
 				time_t now;
 				time(&now);
-				strftime(timeform, sizeof(timeform), "%X", localtime(&now));
+				struct tm nowTm;
+				LocalTime(now, nowTm);
+				strftime(timeform, sizeof(timeform), "%X", &nowTm);
 				const string functionName = EscapeJavaScriptString(logData->Name);
 				const string message = EscapeJavaScriptString(logData->Msg);
 				fprintf(logFile, "<script>Log(\"%s\",\"%s\",\"%s\",\"%s\");</script>\n",
@@ -117,7 +136,10 @@ void CLog::ProcessLog()
 
 void CLog::Initialize(const char *logfile)
 {
-	m_LogFileName = logfile != NULL && *logfile != '\0' ? logfile : "mysql_log.txt";
+	{
+		std::lock_guard<std::mutex> lock(m_TextLogMtx);
+		m_LogFileName = logfile != NULL && *logfile != '\0' ? logfile : "mysql_log.txt";
+	}
 	SetLogType(m_LogType);
 	m_MainThreadID = std::this_thread::get_id();
 }
@@ -135,10 +157,13 @@ void CLog::SetLogType(unsigned int logtype)
 	if (logtype == m_LogType)
 		return;
 
+	{
+		std::lock_guard<std::mutex> lock(m_TextLogMtx);
+		const size_t extension = m_LogFileName.find_last_of('.');
+		const string baseName = extension == string::npos ? m_LogFileName : m_LogFileName.substr(0, extension);
+		m_LogFileName = baseName + (logtype == LOG_TYPE_HTML ? ".html" : ".txt");
+	}
 	m_LogType = logtype;
-	const size_t extension = m_LogFileName.find_last_of('.');
-	const string baseName = extension == string::npos ? m_LogFileName : m_LogFileName.substr(0, extension);
-	m_LogFileName = baseName + (logtype == LOG_TYPE_HTML ? ".html" : ".txt");
 
 	if (logtype == LOG_TYPE_HTML && !m_LogThread.joinable())
 		m_LogThread = std::thread(&CLog::ProcessLog, this);
@@ -180,7 +205,12 @@ int CLog::LogText(unsigned int loglevel, const char *text)
 	char timeform[64];
 	time_t rawtime;
 	time(&rawtime);
-	strftime(timeform, sizeof(timeform), "%X %x", localtime(&rawtime));
+	struct tm nowTm;
+	LocalTime(rawtime, nowTm);
+	strftime(timeform, sizeof(timeform), "%X %x", &nowTm);
+
+	// Query threads log concurrently; keep each line whole and in order.
+	std::lock_guard<std::mutex> lock(m_TextLogMtx);
 	FILE *logFile = fopen(m_LogFileName.c_str(), "a");
 	if (logFile != NULL)
 	{
