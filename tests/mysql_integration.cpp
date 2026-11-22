@@ -7,6 +7,7 @@
 // Server comes from MYSQL_TEST_HOST, MYSQL_TEST_PORT, MYSQL_TEST_USER,
 // MYSQL_TEST_PASSWORD and MYSQL_TEST_DATABASE; without MYSQL_TEST_HOST the
 // test exits with 77, which ctest reports as skipped.
+#include <fstream>
 #include <chrono>
 #include <cmath>
 #include <cstdarg>
@@ -343,6 +344,56 @@ int main(int argc, char **argv)
         CHECK(Call("mysql_close", { np }) == 1);
     }
 
+    // --- debug log follows each query by id -------------------------------
+    {
+        // Only read what this block appends; the file may hold older runs.
+        std::streamoff logStart = 0;
+        {
+            std::ifstream before("mysql_log.txt", std::ios::ate);
+            if (before) logStart = before.tellg();
+        }
+        Call("mysql_log", { 1 | 2 | 4, 1 }); // LOG_ALL, text log
+        int traceCalls = 0;
+        Public("OnTrace", [&](const vector<cell> &) { ++traceCalls; });
+        CHECK(Call("mysql_tquery", { h, Str("SELECT 'trace tquery'"), Str("OnTrace"), Str("") }) == 1);
+        CHECK(Call("mysql_pquery", { h, Str("SELECT 'trace pquery'"), Str("OnTrace"), Str("") }) == 1);
+        CHECK(TickUntil([&] { return traceCalls == 2; }));
+        Call("mysql_log", { 1 | 2, 1 });
+
+        std::ifstream file("mysql_log.txt");
+        file.seekg(logStart);
+        vector<string> lines;
+        for (string line; std::getline(file, line);)
+            lines.push_back(line);
+        // The tag of the query whose queued line contains `text`, then every
+        // stage must appear with that tag on the expected connection.
+        auto CheckTrace = [&](const string &text, const string &worker) {
+            string tag;
+            for (const string &line : lines)
+                if (line.find("queued on") != string::npos && line.find(text) != string::npos)
+                {
+                    const size_t at = line.find("q#");
+                    tag = line.substr(at, line.find(' ', at) - at);
+                }
+            CHECK(!tag.empty());
+            if (tag.empty()) return;
+            auto Has = [&](const string &a, const string &b) {
+                for (const string &line : lines)
+                    if ((line.find(tag + " ") != string::npos || line.find(tag + "]") != string::npos)
+                        && line.find(a) != string::npos && line.find(b) != string::npos)
+                        return true;
+                return false;
+            };
+            CHECK(Has("started after", "[" + worker));
+            CHECK(Has("finished in", "[" + worker));
+            CHECK(Has("calling \"OnTrace\"", "ProcessCallbacks"));
+            CHECK(Has("callback took", "since queued"));
+            CHECK(Has("[OnTrace, " + tag + "]", "executed within"));
+        };
+        CheckTrace("trace tquery", std::to_string(h) + "/tquery]");
+        CheckTrace("trace pquery", std::to_string(h) + "/pool#");
+    }
+
     // --- prepared statements ----------------------------------------------
     int stmtCalls = 0;
     Public("OnStmt", [&](const vector<cell> &) {
@@ -417,6 +468,6 @@ int main(int argc, char **argv)
         std::fprintf(stderr, "MySQL integration: %d check(s) failed\n", failures);
         return 1;
     }
-    std::puts("MySQL integration passed: unreachable server, connect, format, tquery/pquery, pool queue, pquery fallback, cache, errors, stmt, transactions, reconnect, callback burst");
+    std::puts("MySQL integration passed: unreachable server, connect, format, tquery/pquery, pool queue, pquery fallback, query trace, cache, errors, stmt, transactions, reconnect, callback burst");
     return 0;
 }

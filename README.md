@@ -295,6 +295,33 @@ Call `mysql_transaction_rollback` before `mysql_transaction_commit` to discard a
   do `mysql_tquery`, na mesma ordem, e um aviso é registrado no log uma vez
   por conexão.
 
+### Rastreio de queries no log
+
+Com `mysql_log(LOG_ALL)`, cada query com thread recebe um identificador
+(`q#34`) que aparece em todas as linhas sobre ela. Isso permite seguir a query
+desde a fila até o callback e ver qual conexão a executou:
+
+```
+CMySQLHandle::QueueQuery - q#34 queued on 1/pool (2 unprocessed), callback "OnTrace": "SELECT 'trace pquery'"
+CMySQLConnection::ProcessQueries[1/pool#2] - q#34 started after 0.014 ms in queue
+CMySQLQuery::Execute[OnTrace, q#34] - query was successfully executed within 0.138 milliseconds
+CMySQLConnection::ProcessQueries[1/pool#2] - q#34 finished in 0.213 ms (0.227 ms since queued)
+CCallback::ProcessCallbacks - q#34 calling "OnTrace", 0.857 ms after the query finished
+CCallback::ProcessCallbacks - q#34 callback took 0.013 ms (1.097 ms since queued)
+```
+
+- O tempo na fila (`started after`) alto indica que as conexões estão
+  saturadas: aumente `pool_size` ou reduza queries em `mysql_tquery`.
+- O intervalo entre `finished` e `calling` é a espera pelo próximo tick do
+  servidor. `callback took` mede o código Pawn do callback.
+- As conexões aparecem como `<handle>/tquery` e `<handle>/pool#N`, também nas
+  mensagens de conexão, reconexão e charset.
+- Um callback que não existe no script gera um `WARNING`, mesmo sem o modo
+  debug. A exceção é o `OnQueryError`, que é opcional.
+
+O rastreio só é montado quando `LOG_DEBUG` está ativo. Ele grava várias linhas
+por query, então ative-o apenas para investigar.
+
 ### Reconexão e latência
 
 - As threads de consulta acordam assim que uma query entra na fila, em vez de

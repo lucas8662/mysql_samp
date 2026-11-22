@@ -6,10 +6,23 @@
 
 #include "misc.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
 namespace chrono = std::chrono;
+
+static std::atomic<unsigned int> NextQueryId(1);
+
+CMySQLQuery::s_Trace::s_Trace() : Id(NextQueryId++) {}
+
+string CMySQLQuery::LogName(const char *function) const
+{
+	string name = string("CMySQLQuery::") + function + "[";
+	if (!Callback.Name.empty())
+		name += Callback.Name + ", ";
+	return name + Tag() + "]";
+}
 
 CMySQLQuery::~CMySQLQuery()
 {
@@ -181,8 +194,7 @@ static void SetTransactionQueryError(CMySQLQuery *query, const char *log_funcnam
 
 bool CMySQLQuery::ExecuteTransaction(MYSQL *mysql_connection)
 {
-	const string logName = Unthreaded ? "CMySQLQuery::ExecuteTransaction"
-		: "CMySQLQuery::ExecuteTransaction[" + Callback.Name + "]";
+	const string logName = LogName("ExecuteTransaction");
 	const char *log_funcname = logName.c_str();
 
 	bool success = false;
@@ -261,8 +273,7 @@ bool CMySQLQuery::ExecuteTransaction(MYSQL *mysql_connection)
 
 bool CMySQLQuery::ExecutePrepared(MYSQL *mysql_connection)
 {
-	const string logName = Unthreaded ? "CMySQLQuery::ExecutePrepared"
-		: "CMySQLQuery::ExecutePrepared[" + Callback.Name + "]";
+	const string logName = LogName("ExecutePrepared");
 	const char *log_funcname = logName.c_str();
 
 	MYSQL_STMT *statement = mysql_stmt_init(mysql_connection);
@@ -362,8 +373,7 @@ bool CMySQLQuery::Execute(MYSQL *mysql_connection)
 		return ExecuteTransaction(mysql_connection);
 
 	bool ret_val = false;
-	const string logName = Unthreaded ? "CMySQLQuery::Execute"
-		: "CMySQLQuery::Execute[" + Callback.Name + "]";
+	const string logName = LogName("Execute");
 	const char *log_funcname = logName.c_str();
 
 	CLog::Get()->LogFunction(LOG_DEBUG, log_funcname, "starting query execution");
@@ -378,7 +388,7 @@ bool CMySQLQuery::Execute(MYSQL *mysql_connection)
 			query_exec_time_milli = static_cast<unsigned int>(chrono::duration_cast<chrono::milliseconds>(query_exec_duration).count()),
 			query_exec_time_micro = static_cast<unsigned int>(chrono::duration_cast<chrono::microseconds>(query_exec_duration).count());
 
-		CLog::Get()->LogFunction(LOG_DEBUG, log_funcname, "query was successfully executed within %d.%d milliseconds", query_exec_time_milli, query_exec_time_micro-(query_exec_time_milli*1000));
+		CLog::Get()->LogFunction(LOG_DEBUG, log_funcname, "query was successfully executed within %u.%03u milliseconds", query_exec_time_milli, query_exec_time_micro-(query_exec_time_milli*1000));
 
 		MYSQL_RES *mysql_result = mysql_store_result(mysql_connection); //this has to be here
 

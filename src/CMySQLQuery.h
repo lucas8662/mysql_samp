@@ -3,6 +3,7 @@
 #define INC_CMYSQLQUERY_H
 
 
+#include <chrono>
 #include <string>
 #include <stack>
 #include <vector>
@@ -40,6 +41,21 @@ public:
 	CMySQLResult *Result;
 
 	bool Unthreaded;
+
+	// Follows one query through queue, execution and callback in the debug
+	// log; every line about it carries Tag() ("q#<id>").
+	struct s_Trace
+	{
+		typedef std::chrono::steady_clock clock;
+		s_Trace();
+		unsigned int Id;
+		clock::time_point Queued; //unset for unthreaded queries
+		clock::time_point Started;
+		clock::time_point Finished;
+	} Trace;
+	string Tag() const { return "q#" + std::to_string(Trace.Id); }
+	// Name for the log's function column, e.g. "CMySQLQuery::Execute[OnLoad, q#12]".
+	string LogName(const char *function) const;
 
 	// Parameters are copied into the queued query so Pawn memory is never used
 	// from a connector worker thread.

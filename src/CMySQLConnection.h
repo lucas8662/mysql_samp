@@ -42,8 +42,9 @@ class CMySQLConnection
 public:
 	// With a queue the connection gets its own thread and runs the queries
 	// taken from it; without one it is unthreaded (the main connection).
-	// The queue must outlive the connection.
-	static CMySQLConnection *Create(string &host, string &user, string &passwd, string &db, size_t port, bool auto_reconnect, CQueryQueue *queue = nullptr, const CMySQLTLSOptions& tls = CMySQLTLSOptions());
+	// The queue must outlive the connection. name identifies it in the log,
+	// e.g. "1/tquery" or "1/pool#2".
+	static CMySQLConnection *Create(string &host, string &user, string &passwd, string &db, size_t port, bool auto_reconnect, CQueryQueue *queue = nullptr, const CMySQLTLSOptions& tls = CMySQLTLSOptions(), const string &name = "main");
 	void Destroy();
 
 	//(dis)connect to the MySQL server
@@ -90,9 +91,14 @@ private: //functions
 	//called with the query queue locked
 	bool HasPendingWork(bool has_queries);
 	void ScheduleReconnect(bool failed);
+	//"CMySQLConnection::<function>[<name>]" for the log's function column
+	string LogName(const char *function) const
+	{
+		return string("CMySQLConnection::") + function + "[" + m_Name + "]";
+	}
 
 private: //variables
-	CMySQLConnection(string &host, string &user, string &passw, string &db, size_t port, bool auto_reconnect, CQueryQueue *queue, const CMySQLTLSOptions& tls);
+	CMySQLConnection(string &host, string &user, string &passw, string &db, size_t port, bool auto_reconnect, CQueryQueue *queue, const CMySQLTLSOptions& tls, const string &name);
 	~CMySQLConnection();
 
 
@@ -102,6 +108,7 @@ private: //variables
 	//queries this connection's thread runs; owned by the handle, possibly
 	//shared with other connections (pool). NULL for unthreaded connections.
 	CQueryQueue *m_Queue;
+	const string m_Name; //for the log only
 
 	std::mutex m_FuncQueueMtx;
 	std::queue<std::function<bool()> > m_FuncQueue;

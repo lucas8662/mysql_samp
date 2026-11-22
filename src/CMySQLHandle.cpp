@@ -88,13 +88,15 @@ CMySQLHandle *CMySQLHandle::Create(string host, string user, string pass, string
 		//init connections
 		handle->m_MainConnection = main_connection;
 		handle->m_ThreadQueue.reset(new CQueryQueue);
-		handle->m_ThreadConnection = CMySQLConnection::Create(host, user, pass, db, port, reconnect, handle->m_ThreadQueue.get(), tls);
+		const string prefix = std::to_string(id) + "/";
+		handle->m_ThreadConnection = CMySQLConnection::Create(host, user, pass, db, port, reconnect, handle->m_ThreadQueue.get(), tls, prefix + "tquery");
 
 		if (pool_size > 0)
 		{
 			handle->m_PoolQueue.reset(new CQueryQueue);
 			for (size_t i = 0; i < pool_size; ++i)
-				handle->m_ConnectionPool.insert(CMySQLConnection::Create(host, user, pass, db, port, reconnect, handle->m_PoolQueue.get(), tls));
+				handle->m_ConnectionPool.insert(CMySQLConnection::Create(host, user, pass, db, port, reconnect, handle->m_PoolQueue.get(), tls,
+					prefix + "pool#" + std::to_string(i + 1)));
 		}
 
 		SQLHandle.insert( unordered_map<unsigned int, CMySQLHandle*>::value_type(id, handle) );
@@ -154,7 +156,17 @@ bool CMySQLHandle::QueueQuery(std::unique_ptr<CMySQLQuery> query, bool use_pool 
 		return false;
 	}
 	// Count before queueing: the query thread decrements as soon as it runs it.
-	m_QueryCounter++;
+	const unsigned int pending = ++m_QueryCounter;
+	if (CLog::Get()->IsLogLevel(LOG_DEBUG))
+	{
+		string text = query->IsTransaction ? "transaction" : query->Query;
+		if (MySQLOptions.Log_TruncateData && text.length() > 64)
+			text = text.substr(0, 64) + "...";
+		CLog::Get()->LogFunction(LOG_DEBUG, "CMySQLHandle::QueueQuery", "%s queued on %u/%s (%u unprocessed), callback \"%s\": \"%s\"",
+			query->Tag().c_str(), m_MyID, queue == m_PoolQueue.get() ? "pool" : "tquery", pending,
+			query->Callback.Name.c_str(), text.c_str());
+	}
+	query->Trace.Queued = CMySQLQuery::s_Trace::clock::now();
 	queue->Push(std::move(query));
 	return true;
 }

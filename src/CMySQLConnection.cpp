@@ -22,10 +22,15 @@ static const unsigned int CONNECT_TIMEOUT_SECONDS = 10;
 // Safety net only: producers wake the thread explicitly.
 static const unsigned int IDLE_WAIT_MS = 500;
 
-
-CMySQLConnection *CMySQLConnection::Create(string &host, string &user, string &passwd, string &db, size_t port, bool auto_reconnect, CQueryQueue *queue /*= nullptr*/, const CMySQLTLSOptions& tls)
+static double Milliseconds(chrono::steady_clock::duration duration)
 {
-	return new CMySQLConnection(host, user, passwd, db, port, auto_reconnect, queue, tls);
+	return chrono::duration<double, std::milli>(duration).count();
+}
+
+
+CMySQLConnection *CMySQLConnection::Create(string &host, string &user, string &passwd, string &db, size_t port, bool auto_reconnect, CQueryQueue *queue /*= nullptr*/, const CMySQLTLSOptions& tls, const string &name)
+{
+	return new CMySQLConnection(host, user, passwd, db, port, auto_reconnect, queue, tls, name);
 }
 
 void CMySQLConnection::Destroy()
@@ -33,10 +38,11 @@ void CMySQLConnection::Destroy()
 	delete this;
 }
 
-CMySQLConnection::CMySQLConnection(string &host, string &user, string &passw, string &db, size_t port, bool auto_reconnect, CQueryQueue *queue, const CMySQLTLSOptions& tls)
+CMySQLConnection::CMySQLConnection(string &host, string &user, string &passw, string &db, size_t port, bool auto_reconnect, CQueryQueue *queue, const CMySQLTLSOptions& tls, const string &name)
 	: 
 	m_QueryThreadRunning(true),
 	m_Queue(queue),
+	m_Name(name),
 
 	m_ConnectRequested(false),
 	m_ReconnectDelayMs(RECONNECT_DELAY_MIN_MS),
@@ -88,7 +94,7 @@ bool CMySQLConnection::Connect()
 	}
 	else //in query thread or unthreaded: execute
 	{
-		CLog::Get()->LogFunction(LOG_DEBUG, "CMySQLConnection::Connect", "establishing connection to database...");
+		CLog::Get()->LogFunction(LOG_DEBUG, LogName("Connect").c_str(), "establishing connection to database...");
 
 		// A failed mysql_real_connect() frees the connector's options and
 		// recreates their extension with zeroed defaults (including max_columns).
@@ -105,7 +111,7 @@ bool CMySQLConnection::Connect()
 		{
 			m_Connection = mysql_init(NULL);
 			if (m_Connection == NULL)
-				CLog::Get()->LogFunction(LOG_ERROR, "CMySQLConnection::Connect", "MySQL initialization failed");
+				CLog::Get()->LogFunction(LOG_ERROR, LogName("Connect").c_str(), "MySQL initialization failed");
 		}
 		if (m_Connection == NULL)
 			return false;
@@ -135,25 +141,25 @@ bool CMySQLConnection::Connect()
 				m_TLS.Cipher.empty() ? NULL : m_TLS.Cipher.c_str());
 			if (tlsResult != 0)
 			{
-				CLog::Get()->LogFunction(LOG_ERROR, "CMySQLConnection::Connect", "unable to configure TLS: %s", mysql_error(m_Connection));
+				CLog::Get()->LogFunction(LOG_ERROR, LogName("Connect").c_str(), "unable to configure TLS: %s", mysql_error(m_Connection));
 				return false;
 			}
 		}
 
 		if (!m_IsConnected && !mysql_real_connect(m_Connection, m_Host.c_str(), m_User.c_str(), m_Passw.c_str(), m_Database.c_str(), m_Port, NULL, CLIENT_MULTI_RESULTS | (m_TLS.Enabled ? CLIENT_SSL : 0)))
 		{
-			CLog::Get()->LogFunction(LOG_ERROR, "CMySQLConnection::Connect", "(error #%d) %s", mysql_errno(m_Connection), mysql_error(m_Connection));
+			CLog::Get()->LogFunction(LOG_ERROR, LogName("Connect").c_str(), "(error #%d) %s", mysql_errno(m_Connection), mysql_error(m_Connection));
 
 			m_IsConnected = false;
 			ScheduleReconnect(true);
 		}
 		else
 		{
-			CLog::Get()->LogFunction(LOG_DEBUG, "CMySQLConnection::Connect", "connection was successful");
+			CLog::Get()->LogFunction(LOG_DEBUG, LogName("Connect").c_str(), "connection was successful");
 
 			my_bool reconnect = m_AutoReconnect;
 			mysql_options(m_Connection, MYSQL_OPT_RECONNECT, &reconnect);
-			CLog::Get()->LogFunction(LOG_DEBUG, "CMySQLConnection::Connect", "auto-reconnect has been %s", m_AutoReconnect == true ? "enabled" : "disabled");
+			CLog::Get()->LogFunction(LOG_DEBUG, LogName("Connect").c_str(), "auto-reconnect has been %s", m_AutoReconnect == true ? "enabled" : "disabled");
 
 			m_IsConnected = true;
 			ScheduleReconnect(false);
@@ -174,13 +180,13 @@ bool CMySQLConnection::Disconnect()
 		m_ConnectRequested = false;
 
 		if (m_Connection == NULL || m_IsConnected == false)
-			CLog::Get()->LogFunction(LOG_WARNING, "CMySQLConnection::Disconnect", "no connection available");
+			CLog::Get()->LogFunction(LOG_WARNING, LogName("Disconnect").c_str(), "no connection available");
 		else
 		{
 			m_IsConnected = false;
 			mysql_close(m_Connection);
 			m_Connection = NULL;
-			CLog::Get()->LogFunction(LOG_DEBUG, "CMySQLConnection::Disconnect", "connection was closed");
+			CLog::Get()->LogFunction(LOG_DEBUG, LogName("Disconnect").c_str(), "connection was closed");
 		}
 	}
 	return true;
@@ -230,17 +236,17 @@ bool CMySQLConnection::SetCharset(string charset)
 	}
 	else //in query thread or unthreaded: execute
 	{
-		CLog::Get()->LogFunction(LOG_DEBUG, "CMySQLConnection::SetCharset", "setting charset \"%s\"", charset.c_str());
+		CLog::Get()->LogFunction(LOG_DEBUG, LogName("SetCharset").c_str(), "setting charset \"%s\"", charset.c_str());
 		if (m_IsConnected && !charset.empty())
 		{
 			int error = mysql_set_character_set(m_Connection, charset.c_str());
 			if (error == 0)
-				CLog::Get()->LogFunction(LOG_DEBUG, "CMySQLConnection::SetCharset", "charset \"%s\" has been set", charset.c_str());
+				CLog::Get()->LogFunction(LOG_DEBUG, LogName("SetCharset").c_str(), "charset \"%s\" has been set", charset.c_str());
 			else
-				CLog::Get()->LogFunction(LOG_ERROR, "CMySQLConnection::SetCharset", "error %d: %s", error, mysql_error(m_Connection));
+				CLog::Get()->LogFunction(LOG_ERROR, LogName("SetCharset").c_str(), "error %d: %s", error, mysql_error(m_Connection));
 		}
 		else
-			CLog::Get()->LogFunction(LOG_ERROR, "CMySQLConnection::SetCharset", "invalid charset (\"%s\") or not connected", charset.c_str());
+			CLog::Get()->LogFunction(LOG_ERROR, LogName("SetCharset").c_str(), "invalid charset (\"%s\") or not connected", charset.c_str());
 	}
 	return true;
 }
@@ -284,7 +290,7 @@ void CMySQLConnection::ScheduleReconnect(bool failed)
 
 	m_NextReconnect = chrono::steady_clock::now() + chrono::milliseconds(m_ReconnectDelayMs);
 	if (m_QueryThread.joinable() && m_AutoReconnect)
-		CLog::Get()->LogFunction(LOG_WARNING, "CMySQLConnection::Connect", "retrying connection in %u ms", m_ReconnectDelayMs);
+		CLog::Get()->LogFunction(LOG_WARNING, LogName("Connect").c_str(), "retrying connection in %u ms", m_ReconnectDelayMs);
 
 	m_ReconnectDelayMs *= 2;
 	if (m_ReconnectDelayMs > RECONNECT_DELAY_MAX_MS)
@@ -313,7 +319,7 @@ void CMySQLConnection::ProcessQueries()
 		const bool wantsReconnect = !m_IsConnected && m_AutoReconnect && m_ConnectRequested;
 		if (wantsReconnect && chrono::steady_clock::now() >= m_NextReconnect)
 		{
-			CLog::Get()->LogFunction(LOG_WARNING, "CMySQLConnection::ProcessQueries", "not connected, trying to reconnect...");
+			CLog::Get()->LogFunction(LOG_WARNING, LogName("ProcessQueries").c_str(), "not connected, trying to reconnect...");
 			Connect();
 		}
 
@@ -325,12 +331,26 @@ void CMySQLConnection::ProcessQueries()
 			std::unique_ptr<CMySQLQuery> query = m_Queue->TryPop();
 			if (!query)
 				break;
-			if(query->Execute(m_Connection) == false)
+			const bool trace = CLog::Get()->IsLogLevel(LOG_DEBUG);
+			query->Trace.Started = chrono::steady_clock::now();
+			if (trace)
+				CLog::Get()->LogFunction(LOG_DEBUG, LogName("ProcessQueries").c_str(), "%s started after %.3f ms in queue",
+					query->Tag().c_str(), Milliseconds(query->Trace.Started - query->Trace.Queued));
+
+			const bool succeeded = query->Execute(m_Connection);
+			query->Trace.Finished = chrono::steady_clock::now();
+			if (trace)
+				CLog::Get()->LogFunction(LOG_DEBUG, LogName("ProcessQueries").c_str(), "%s %s in %.3f ms (%.3f ms since queued)",
+					query->Tag().c_str(), succeeded ? "finished" : "failed",
+					Milliseconds(query->Trace.Finished - query->Trace.Started),
+					Milliseconds(query->Trace.Finished - query->Trace.Queued));
+
+			if(succeeded == false)
 			{
 				const unsigned int error = mysql_errno(m_Connection);
 				if (m_AutoReconnect && (error == ERROR_SERVER_GONE || error == ERROR_SERVER_LOST))
 				{
-					CLog::Get()->LogFunction(LOG_WARNING, "CMySQLConnection::ProcessQueries", "lost connection, reconnecting...");
+					CLog::Get()->LogFunction(LOG_WARNING, LogName("ProcessQueries").c_str(), "lost connection, reconnecting...");
 					Reconnect();
 				}
 			}
