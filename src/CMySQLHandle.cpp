@@ -1,14 +1,12 @@
 #include "CMySQLHandle.h"
 #include "CMySQLResult.h"
+#include "CMySQLQuery.h"
 #include "CMySQLConnection.h"
 #include "CLog.h"
 #include "COrm.h"
 #include "IdAllocator.h"
 
 
-#include <boost/bind/bind.hpp>
-#include <boost/chrono.hpp>
-namespace chrono = boost::chrono;
 
 
 unordered_map<unsigned int, CMySQLHandle *> CMySQLHandle::SQLHandle;
@@ -17,16 +15,16 @@ CMySQLOptions MySQLOptions;
 
 
 CMySQLHandle::CMySQLHandle(unsigned int id) : 
-	m_MyID(id),
-	
+	m_QueryCounter(0),
+
 	m_ActiveResult(NULL),
 	m_ActiveResultID(0),
 	m_NextResultID(1),
-	
-	m_MainConnection(NULL),
-	m_ThreadConnection(NULL),
 
-	m_QueryCounter(0)
+	m_MyID(id),
+
+	m_MainConnection(NULL),
+	m_ThreadConnection(NULL)
 {
 	CLog::Get()->LogFunction(LOG_DEBUG, "CMySQLHandle::CMySQLHandle", "constructor called");
 }
@@ -39,7 +37,7 @@ CMySQLHandle::~CMySQLHandle()
 	if (m_ActiveResultID == 0)
 		delete m_ActiveResult;
 	
-	ExecuteOnConnections(boost::bind(&CMySQLConnection::Destroy, boost::placeholders::_1));
+	ExecuteOnConnections([](CMySQLConnection *connection) { connection->Destroy(); });
 
 	CLog::Get()->LogFunction(LOG_DEBUG, "CMySQLHandle::~CMySQLHandle", "deconstructor called");
 }
@@ -109,7 +107,7 @@ void CMySQLHandle::Destroy()
 	delete this;
 }
 
-void CMySQLHandle::ExecuteOnConnections(function<void (CMySQLConnection *)> func)
+void CMySQLHandle::ExecuteOnConnections(const std::function<void (CMySQLConnection *)> &func)
 {
 	if (m_MainConnection != NULL)
 		func(m_MainConnection);
@@ -122,29 +120,27 @@ void CMySQLHandle::ExecuteOnConnections(function<void (CMySQLConnection *)> func
 		func(*c);
 }
 
-bool CMySQLHandle::QueueQuery(CMySQLQuery *query, bool use_pool /*= false*/)
+bool CMySQLHandle::QueueQuery(std::unique_ptr<CMySQLQuery> query, bool use_pool /*= false*/)
 {
-	if(use_pool == false)
+	CMySQLConnection *connection = NULL;
+	if (use_pool == false)
+		connection = m_ThreadConnection;
+	else if (m_ConnectionPool.size() > 0)
 	{
-		if (m_ThreadConnection != NULL && m_ThreadConnection->QueueQuery(query))
-		{
-			m_QueryCounter++;
-			return true;
-		}
-	}
-	else if(use_pool == true && m_ConnectionPool.size() > 0)
-	{
-		CMySQLConnection *connection = *m_CurrentConPoolPos++;
+		connection = *m_CurrentConPoolPos++;
 		if(m_CurrentConPoolPos == m_ConnectionPool.end())
 			m_CurrentConPoolPos = m_ConnectionPool.begin();
-		if (connection->QueueQuery(query))
-		{
-			m_QueryCounter++;
-			return true;
-		}
 	}
-	CLog::Get()->LogFunction(LOG_ERROR, "CMySQLHandle::QueueQuery", "query queue is full");
-	return false;
+
+	if (connection == NULL)
+	{
+		CLog::Get()->LogFunction(LOG_ERROR, "CMySQLHandle::QueueQuery", "no %s connection available", use_pool ? "pool" : "threaded");
+		return false;
+	}
+	// Count before queueing: the query thread decrements as soon as it runs it.
+	m_QueryCounter++;
+	connection->QueueQuery(std::move(query));
+	return true;
 }
 
 unsigned int CMySQLHandle::SaveActiveResult() 

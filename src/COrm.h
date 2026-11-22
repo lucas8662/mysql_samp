@@ -6,17 +6,15 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include <boost/unordered_map.hpp>
-#include <boost/variant.hpp>
+#include <unordered_map>
 
 using std::string;
 using std::vector;
-using boost::unordered_map;
+using std::unordered_map;
 
 #include "main.h"
 
 
-typedef boost::variant<int, double, string> VarType;
 
 
 #define ERROR_INVALID_ORM_ID(function, id) \

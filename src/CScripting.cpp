@@ -1,5 +1,3 @@
-#pragma once
-
 #include "CScripting.h"
 #include "CMySQLHandle.h"
 #include "CMySQLResult.h"
@@ -15,12 +13,14 @@
 using SqlInput::Trim;
 using SqlInput::ParseUnsigned;
 
-#include <boost/bind/bind.hpp>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstring>
 #include <fstream>
 #include <map>
 #include <vector>
+#include <cstdlib>
 
 struct CPreparedStatementTemplate
 {
@@ -238,8 +238,8 @@ AMX_DECLARE_NATIVE(Native::orm_select)
 
 	COrm *OrmObject = COrm::GetOrm(orm_id);
 	CMySQLHandle *Handle = OrmObject->GetConnectionHandle();
-	CMySQLQuery *query = new CMySQLQuery;
-	CCallback::Get()->BindOwner(query, amx);
+	std::unique_ptr<CMySQLQuery> query(new CMySQLQuery);
+	CCallback::Get()->BindOwner(query.get(), amx);
 
 	if(OrmObject->GenerateSelectQuery(query->Query))
 	{
@@ -261,14 +261,12 @@ AMX_DECLARE_NATIVE(Native::orm_select)
 		query->Orm.Bound = true;
 		query->Orm.Type = ORM_QUERYTYPE_SELECT;
 	
-		if (Handle->QueueQuery(query))
+		if (Handle->QueueQuery(std::move(query)))
 			return 1;
-		delete query;
 		return 0;
 	}
 	else
 	{
-		delete query;
 		return 0;
 	}
 }
@@ -285,8 +283,8 @@ AMX_DECLARE_NATIVE(Native::orm_update)
 
 	COrm *OrmObject = COrm::GetOrm(orm_id);
 	CMySQLHandle *Handle = OrmObject->GetConnectionHandle();
-	CMySQLQuery *query = new CMySQLQuery;
-	CCallback::Get()->BindOwner(query, amx);
+	std::unique_ptr<CMySQLQuery> query(new CMySQLQuery);
+	CCallback::Get()->BindOwner(query.get(), amx);
 
 	if(OrmObject->GenerateUpdateQuery(query->Query))
 	{
@@ -304,14 +302,12 @@ AMX_DECLARE_NATIVE(Native::orm_update)
 		query->Orm.Bound = true;
 		query->Orm.Type = ORM_QUERYTYPE_UPDATE;
 
-		if (Handle->QueueQuery(query))
+		if (Handle->QueueQuery(std::move(query)))
 			return 1;
-		delete query;
 		return 0;
 	}
 	else
 	{
-		delete query;
 		return 0;
 	}
 }
@@ -337,8 +333,8 @@ AMX_DECLARE_NATIVE(Native::orm_insert)
 
 	COrm *OrmObject = COrm::GetOrm(orm_id);
 	CMySQLHandle *Handle = OrmObject->GetConnectionHandle();
-	CMySQLQuery *query = new CMySQLQuery;
-	CCallback::Get()->BindOwner(query, amx);
+	std::unique_ptr<CMySQLQuery> query(new CMySQLQuery);
+	CCallback::Get()->BindOwner(query.get(), amx);
 
 	if(OrmObject->GenerateInsertQuery(query->Query))
 	{
@@ -360,14 +356,12 @@ AMX_DECLARE_NATIVE(Native::orm_insert)
 		query->Orm.Bound = true;
 		query->Orm.Type = ORM_QUERYTYPE_INSERT;
 
-		if (Handle->QueueQuery(query))
+		if (Handle->QueueQuery(std::move(query)))
 			return 1;
-		delete query;
 		return 0;
 	}
 	else
 	{
-		delete query;
 		return 0;
 	}
 }
@@ -385,8 +379,8 @@ AMX_DECLARE_NATIVE(Native::orm_delete)
 
 	COrm *OrmObject = COrm::GetOrm(orm_id);
 	CMySQLHandle *Handle = OrmObject->GetConnectionHandle();
-	CMySQLQuery *query = new CMySQLQuery;
-	CCallback::Get()->BindOwner(query, amx);
+	std::unique_ptr<CMySQLQuery> query(new CMySQLQuery);
+	CCallback::Get()->BindOwner(query.get(), amx);
 
 	if(OrmObject->GenerateDeleteQuery(query->Query))
 	{
@@ -404,11 +398,8 @@ AMX_DECLARE_NATIVE(Native::orm_delete)
 		query->Orm.Bound = true;
 		query->Orm.Type = ORM_QUERYTYPE_DELETE;
 
-		if (!Handle->QueueQuery(query))
-		{
-			delete query;
+		if (!Handle->QueueQuery(std::move(query)))
 			return 0;
-		}
 
 		if(clear_vars == true)
 			OrmObject->ClearVariableValues();
@@ -417,7 +408,6 @@ AMX_DECLARE_NATIVE(Native::orm_delete)
 	}
 	else
 	{
-		delete query;
 		return 0;
 	}
 }
@@ -443,8 +433,8 @@ AMX_DECLARE_NATIVE(Native::orm_save)
 
 	COrm *OrmObject = COrm::GetOrm(orm_id);
 	CMySQLHandle *Handle = OrmObject->GetConnectionHandle();
-	CMySQLQuery *query = new CMySQLQuery;
-	CCallback::Get()->BindOwner(query, amx);
+	std::unique_ptr<CMySQLQuery> query(new CMySQLQuery);
+	CCallback::Get()->BindOwner(query.get(), amx);
 
 
 	query->Orm.Type = OrmObject->GenerateSaveQuery(query->Query);
@@ -467,14 +457,12 @@ AMX_DECLARE_NATIVE(Native::orm_save)
 		query->Orm.Lifetime = OrmObject->GetLifetime();
 		query->Orm.Bound = true;
 
-		if (Handle->QueueQuery(query))
+		if (Handle->QueueQuery(std::move(query)))
 			return 1;
-		delete query;
 		return 0;
 	}
 	else
 	{
-		delete query;
 		return 0;
 	}
 }
@@ -921,7 +909,7 @@ AMX_DECLARE_NATIVE(Native::mysql_connect)
 
 	CMySQLHandle *Handle = CMySQLHandle::Create(host, user, pass != NULL ? pass : "", db, port, pool_size, auto_reconnect);
 	if (Handle == NULL) return 0;
-	Handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Connect, boost::placeholders::_1));
+	Handle->ExecuteOnConnections([](CMySQLConnection *connection) { connection->Connect(); });
 
 	return static_cast<cell>(Handle->GetID());
 }
@@ -957,7 +945,7 @@ AMX_DECLARE_NATIVE(Native::mysql_connect_ssl)
 	const size_t poolSize = params[12];
 	CMySQLHandle *handle = CMySQLHandle::Create(host, user, password != NULL ? password : "", database, port, poolSize, autoReconnect, tls);
 	if (handle == NULL) return 0;
-	handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Connect, boost::placeholders::_1));
+	handle->ExecuteOnConnections([](CMySQLConnection *connection) { connection->Connect(); });
 	return static_cast<cell>(handle->GetID());
 }
 
@@ -980,7 +968,7 @@ AMX_DECLARE_NATIVE(Native::mysql_connect_file)
 
 	CMySQLHandle *handle = CMySQLHandle::Create(host, user, password, database, port, poolSize, autoReconnect, tls);
 	if (handle == NULL) return 0;
-	handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Connect, boost::placeholders::_1));
+	handle->ExecuteOnConnections([](CMySQLConnection *connection) { connection->Connect(); });
 	return static_cast<cell>(handle->GetID());
 }
 
@@ -1016,7 +1004,7 @@ AMX_DECLARE_NATIVE(Native::mysql_reconnect)
 
 	CMySQLHandle *Handle = CMySQLHandle::GetHandle(connection_id);
 
-	Handle->ExecuteOnConnections(boost::bind(&CMySQLConnection::Reconnect, boost::placeholders::_1));
+	Handle->ExecuteOnConnections([](CMySQLConnection *connection) { connection->Reconnect(); });
 	return 1;
 }
 
@@ -1100,8 +1088,8 @@ AMX_DECLARE_NATIVE(Native::mysql_pquery)
 
 
 	CMySQLHandle *Handle = CMySQLHandle::GetHandle(connection_id);
-	CMySQLQuery *query = new CMySQLQuery;
-	CCallback::Get()->BindOwner(query, amx);
+	std::unique_ptr<CMySQLQuery> query(new CMySQLQuery);
+	CCallback::Get()->BindOwner(query.get(), amx);
 
 	query->Query = (query_str != NULL ? query_str : string());
 	query->Callback.Name = (cb_name != NULL ? cb_name : string());
@@ -1110,9 +1098,8 @@ AMX_DECLARE_NATIVE(Native::mysql_pquery)
 
 	query->Handle = Handle;
 	
-	if (Handle->QueueQuery(query, true))
+	if (Handle->QueueQuery(std::move(query), true))
 		return 1;
-	delete query;
 	return 0;
 }
 
@@ -1146,8 +1133,8 @@ AMX_DECLARE_NATIVE(Native::mysql_tquery)
 
 
 	CMySQLHandle *Handle = CMySQLHandle::GetHandle(connection_id);
-	CMySQLQuery *query = new CMySQLQuery;
-	CCallback::Get()->BindOwner(query, amx);
+	std::unique_ptr<CMySQLQuery> query(new CMySQLQuery);
+	CCallback::Get()->BindOwner(query.get(), amx);
 
 	query->Query = (query_str != NULL ? query_str : string());
 	query->Callback.Name = (cb_name != NULL ? cb_name : string());
@@ -1156,9 +1143,8 @@ AMX_DECLARE_NATIVE(Native::mysql_tquery)
 
 	query->Handle = Handle;
 	
-	if (Handle->QueueQuery(query))
+	if (Handle->QueueQuery(std::move(query)))
 		return 1;
-	delete query;
 	return 0;
 }
 
@@ -1303,8 +1289,8 @@ AMX_DECLARE_NATIVE(Native::mysql_stmt_execute)
 	if (callbackFormat != NULL && strlen(callbackFormat) != ((params[0] / 4) - ConstParamCount))
 		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_stmt_execute", "callback parameter count does not match format specifier length");
 
-	CMySQLQuery *query = new CMySQLQuery;
-	CCallback::Get()->BindOwner(query, amx);
+	std::unique_ptr<CMySQLQuery> query(new CMySQLQuery);
+	CCallback::Get()->BindOwner(query.get(), amx);
 	query->Query = statement->Query;
 	query->StatementParameters = statement->Parameters;
 	query->IsPreparedStatement = true;
@@ -1312,9 +1298,8 @@ AMX_DECLARE_NATIVE(Native::mysql_stmt_execute)
 	if (callbackFormat != NULL)
 		CCallback::Get()->FillCallbackParams(query->Callback.Params, callbackFormat, amx, params, ConstParamCount);
 	query->Handle = CMySQLHandle::GetHandle(statement->ConnectionID);
-	if (query->Handle->QueueQuery(query))
+	if (CMySQLHandle *target = query->Handle; target->QueueQuery(std::move(query)))
 		return 1;
-	delete query;
 	return 0;
 }
 
@@ -1385,8 +1370,8 @@ AMX_DECLARE_NATIVE(Native::mysql_transaction_commit)
 	if (callbackFormat != NULL && strlen(callbackFormat) != ((params[0] / 4) - ConstParamCount))
 		return CLog::Get()->LogFunction(LOG_ERROR, "mysql_transaction_commit", "callback parameter count does not match format specifier length");
 
-	CMySQLQuery *query = new CMySQLQuery;
-	CCallback::Get()->BindOwner(query, amx);
+	std::unique_ptr<CMySQLQuery> query(new CMySQLQuery);
+	CCallback::Get()->BindOwner(query.get(), amx);
 	query->Query = "transaction";
 	query->TransactionQueries = it->second.Queries;
 	query->IsTransaction = true;
@@ -1394,12 +1379,11 @@ AMX_DECLARE_NATIVE(Native::mysql_transaction_commit)
 	if (callbackFormat != NULL)
 		CCallback::Get()->FillCallbackParams(query->Callback.Params, callbackFormat, amx, params, ConstParamCount);
 	query->Handle = CMySQLHandle::GetHandle(it->second.ConnectionID);
-	if (query->Handle->QueueQuery(query))
+	if (CMySQLHandle *target = query->Handle; target->QueueQuery(std::move(query)))
 	{
 		Transactions.erase(it);
 		return 1;
 	}
-	delete query;
 	return 0;
 }
 
@@ -1438,8 +1422,8 @@ AMX_DECLARE_NATIVE(Native::mysql_tquery_file)
 	CMySQLHandle *handle = CMySQLHandle::GetHandle(connectionID);
 	for (size_t index = 0; index < queries.size(); ++index)
 	{
-		CMySQLQuery *query = new CMySQLQuery;
-		CCallback::Get()->BindOwner(query, amx);
+		std::unique_ptr<CMySQLQuery> query(new CMySQLQuery);
+		CCallback::Get()->BindOwner(query.get(), amx);
 		query->Query = queries[index];
 		query->Handle = handle;
 		if (index + 1 == queries.size())
@@ -1448,11 +1432,8 @@ AMX_DECLARE_NATIVE(Native::mysql_tquery_file)
 			if (callbackFormat != NULL)
 				CCallback::Get()->FillCallbackParams(query->Callback.Params, callbackFormat, amx, params, ConstParamCount);
 		}
-		if (!handle->QueueQuery(query))
-		{
-			delete query;
+		if (!handle->QueueQuery(std::move(query)))
 			return 0;
-		}
 	}
 
 	CLog::Get()->LogFunction(LOG_DEBUG, "mysql_tquery_file", "queued %d queries from %s", static_cast<int>(queries.size()), path.c_str());
@@ -1795,7 +1776,7 @@ AMX_DECLARE_NATIVE(Native::mysql_set_charset)
 		return ERROR_INVALID_CONNECTION_HANDLE("mysql_set_charset", connection_id);
 
 
-	CMySQLHandle::GetHandle(connection_id)->ExecuteOnConnections(boost::bind(&CMySQLConnection::SetCharset, boost::placeholders::_1, string(charset)));
+	CMySQLHandle::GetHandle(connection_id)->ExecuteOnConnections([value = string(charset)](CMySQLConnection *connection) { connection->SetCharset(value); });
 	return 1;
 }
 

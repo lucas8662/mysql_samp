@@ -6,8 +6,10 @@
 
 #include "misc.h"
 
-#include <boost/chrono.hpp>
-namespace chrono = boost::chrono;
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
+namespace chrono = std::chrono;
 
 CMySQLQuery::~CMySQLQuery()
 {
@@ -46,7 +48,6 @@ bool CMySQLQuery::StorePreparedResult(MYSQL_STMT *statement)
 	vector<my_bool> isNull(fieldCount);
 	vector<my_bool> errors(fieldCount);
 	vector<char> placeholders(fieldCount);
-	memset(bindings.empty() ? NULL : &bindings[0], 0, bindings.size() * sizeof(MYSQL_BIND));
 	for (unsigned int field = 0; field < fieldCount; ++field)
 	{
 		bindings[field].buffer_type = MYSQL_TYPE_STRING;
@@ -287,7 +288,6 @@ bool CMySQLQuery::ExecutePrepared(MYSQL *mysql_connection)
 	{
 		vector<MYSQL_BIND> bindings(StatementParameters.size());
 		vector<unsigned long> lengths(StatementParameters.size());
-		memset(bindings.empty() ? NULL : &bindings[0], 0, bindings.size() * sizeof(MYSQL_BIND));
 
 		for (size_t index = 0; index < StatementParameters.size(); ++index)
 		{
@@ -469,7 +469,7 @@ bool CMySQLQuery::StoreResult(MYSQL *mysql_connection, MYSQL_RES *mysql_result)
 		Result->m_FieldNames.reserve(Result->m_Fields + 1);
 
 
-		while (mysql_field = mysql_fetch_field(mysql_result))
+		while ((mysql_field = mysql_fetch_field(mysql_result)) != NULL)
 		{
 			Result->m_FieldNames.push_back(mysql_field->name);
 		}

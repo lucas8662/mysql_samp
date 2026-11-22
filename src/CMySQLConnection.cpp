@@ -3,10 +3,10 @@
 #include "CMySQLResult.h"
 #include "CCallback.h"
 #include "CLog.h"
+#include <cstdlib>
+#include <cstring>
 
-#include <boost/chrono.hpp>
-namespace chrono = boost::chrono;
-namespace this_thread = boost::this_thread;
+namespace chrono = std::chrono;
 
 // Connector/C client error codes for a dead connection (errmsg.h).
 static const unsigned int ERROR_SERVER_GONE = 2006; // CR_SERVER_GONE_ERROR
@@ -34,7 +34,6 @@ void CMySQLConnection::Destroy()
 
 CMySQLConnection::CMySQLConnection(string &host, string &user, string &passw, string &db, size_t port, bool auto_reconnect, bool threaded, const CMySQLTLSOptions& tls)
 	: 
-	m_QueryThread(NULL),
 	m_QueryThreadRunning(true),
 
 	m_ConnectRequested(false),
@@ -53,25 +52,20 @@ CMySQLConnection::CMySQLConnection(string &host, string &user, string &passw, st
 	m_Connection(NULL)
 {
 	if(threaded)
-		m_QueryThread = new thread(boost::bind(&CMySQLConnection::ProcessQueries, this));
+		m_QueryThread = std::thread(&CMySQLConnection::ProcessQueries, this);
 }
 
 CMySQLConnection::~CMySQLConnection()
 {
-	if(m_QueryThread != NULL)
+	if(m_QueryThread.joinable())
 	{
 		// Do not leave queued work running against a connection that is about to
 		// disappear.  The old path queued Disconnect(), then destroyed this
 		// object immediately, which left the worker with a dangling pointer.
 		m_QueryThreadRunning = false;
 		WakeUp();
-		m_QueryThread->join();
-		delete m_QueryThread;
-		m_QueryThread = NULL;
-	
-		CMySQLQuery *query = NULL;
-		while(m_QueryQueue.pop(query))
-			delete query;
+		m_QueryThread.join();
+		m_QueryQueue.clear();
 	}
 
 	if (m_Connection != NULL)
@@ -84,9 +78,9 @@ CMySQLConnection::~CMySQLConnection()
 
 bool CMySQLConnection::Connect()
 {
-	if(m_QueryThread != NULL && this_thread::get_id() != m_QueryThread->get_id()) //not in query thread and threaded: queue
+	if(MustQueue()) //not in query thread and threaded: queue
 	{
-		QueueFunction(boost::bind(&CMySQLConnection::Connect, this));
+		QueueFunction([this] { return Connect(); });
 	}
 	else //in query thread or unthreaded: execute
 	{
@@ -166,9 +160,9 @@ bool CMySQLConnection::Connect()
 
 bool CMySQLConnection::Disconnect()
 {
-	if(m_QueryThread != NULL && this_thread::get_id() != m_QueryThread->get_id()) //not in query thread and threaded: queue
+	if(MustQueue()) //not in query thread and threaded: queue
 	{
-		QueueFunction(boost::bind(&CMySQLConnection::Disconnect, this));
+		QueueFunction([this] { return Disconnect(); });
 	}
 	else //in query thread or unthreaded: execute
 	{
@@ -190,11 +184,11 @@ bool CMySQLConnection::Disconnect()
 
 bool CMySQLConnection::Reconnect()
 {
-	if(m_QueryThread != NULL && this_thread::get_id() != m_QueryThread->get_id()) //not in query thread and threaded: queue
+	if(MustQueue()) //not in query thread and threaded: queue
 	{
 		// Queued as one job: queuing Disconnect and Connect separately allowed a
 		// deferred Disconnect to run after Connect and leave the link closed.
-		QueueFunction(boost::bind(&CMySQLConnection::Reconnect, this));
+		QueueFunction([this] { return Reconnect(); });
 	}
 	else //in query thread or unthreaded: execute
 	{
@@ -226,9 +220,9 @@ bool CMySQLConnection::EscapeString(const char *src, string &dest)
 
 bool CMySQLConnection::SetCharset(string charset)
 {
-	if(m_QueryThread != NULL && this_thread::get_id() != m_QueryThread->get_id()) //not in query thread and threaded: queue
+	if(MustQueue()) //not in query thread and threaded: queue
 	{
-		QueueFunction(boost::bind(&CMySQLConnection::SetCharset, this, charset));
+		QueueFunction([this, charset] { return SetCharset(charset); });
 	}
 	else //in query thread or unthreaded: execute
 	{
@@ -247,11 +241,30 @@ bool CMySQLConnection::SetCharset(string charset)
 	return true;
 }
 
-void CMySQLConnection::QueueFunction(const function<bool()> &func)
+void CMySQLConnection::QueueQuery(std::unique_ptr<CMySQLQuery> query)
 {
 	{
-		boost::lock_guard<boost::mutex> lockguard(m_FuncQueueMtx);
-		m_FuncQueue.push(func);
+		std::lock_guard<std::mutex> lockguard(m_QueryQueueMtx);
+		m_QueryQueue.push_back(std::move(query));
+	}
+	WakeUp();
+}
+
+std::unique_ptr<CMySQLQuery> CMySQLConnection::PopQuery()
+{
+	std::lock_guard<std::mutex> lockguard(m_QueryQueueMtx);
+	if (m_QueryQueue.empty())
+		return nullptr;
+	std::unique_ptr<CMySQLQuery> query = std::move(m_QueryQueue.front());
+	m_QueryQueue.pop_front();
+	return query;
+}
+
+void CMySQLConnection::QueueFunction(std::function<bool()> func)
+{
+	{
+		std::lock_guard<std::mutex> lockguard(m_FuncQueueMtx);
+		m_FuncQueue.push(std::move(func));
 	}
 	WakeUp();
 }
@@ -261,14 +274,14 @@ void CMySQLConnection::WakeUp()
 	// Taking the mutex orders this notification after the worker's predicate
 	// check, so a wake-up cannot be lost between the check and the wait.
 	{
-		boost::lock_guard<boost::mutex> lockguard(m_WakeMtx);
+		std::lock_guard<std::mutex> lockguard(m_WakeMtx);
 	}
 	m_WakeCond.notify_one();
 }
 
 bool CMySQLConnection::HasPendingFunctions()
 {
-	boost::lock_guard<boost::mutex> lockguard(m_FuncQueueMtx);
+	std::lock_guard<std::mutex> lockguard(m_FuncQueueMtx);
 	return !m_FuncQueue.empty();
 }
 
@@ -276,7 +289,7 @@ bool CMySQLConnection::HasPendingWork()
 {
 	return !m_QueryThreadRunning
 		|| HasPendingFunctions()
-		|| (m_IsConnected && m_QueryQueue.read_available() > 0);
+		|| (m_IsConnected && HasQueuedQueries());
 }
 
 void CMySQLConnection::ScheduleReconnect(bool failed)
@@ -288,7 +301,7 @@ void CMySQLConnection::ScheduleReconnect(bool failed)
 	}
 
 	m_NextReconnect = chrono::steady_clock::now() + chrono::milliseconds(m_ReconnectDelayMs);
-	if (m_QueryThread != NULL && m_AutoReconnect)
+	if (m_QueryThread.joinable() && m_AutoReconnect)
 		CLog::Get()->LogFunction(LOG_WARNING, "CMySQLConnection::Connect", "retrying connection in %u ms", m_ReconnectDelayMs);
 
 	m_ReconnectDelayMs *= 2;
@@ -301,9 +314,9 @@ void CMySQLConnection::ProcessQueries()
 	mysql_thread_init();
 	while(m_QueryThreadRunning)
 	{
-		queue<function<bool()> > functions;
+		std::queue<std::function<bool()> > functions;
 		{
-			boost::lock_guard<boost::mutex> lockguard(m_FuncQueueMtx);
+			std::lock_guard<std::mutex> lockguard(m_FuncQueueMtx);
 			functions.swap(m_FuncQueue);
 		}
 		while (!functions.empty())
@@ -322,9 +335,11 @@ void CMySQLConnection::ProcessQueries()
 			Connect();
 		}
 
-		CMySQLQuery *query;
-		while(m_QueryThreadRunning && m_IsConnected && m_QueryQueue.pop(query))
+		while(m_QueryThreadRunning && m_IsConnected)
 		{
+			std::unique_ptr<CMySQLQuery> query = PopQuery();
+			if (!query)
+				break;
 			if(query->Execute(m_Connection) == false)
 			{
 				const unsigned int error = mysql_errno(m_Connection);
@@ -334,7 +349,7 @@ void CMySQLConnection::ProcessQueries()
 					Reconnect();
 				}
 			}
-			CCallback::Get()->QueueQuery(query);
+			CCallback::Get()->QueueQuery(std::move(query));
 		}
 
 		unsigned int waitMs = IDLE_WAIT_MS;
@@ -353,8 +368,8 @@ void CMySQLConnection::ProcessQueries()
 
 		if (waitMs > 0)
 		{
-			boost::unique_lock<boost::mutex> lock(m_WakeMtx);
-			m_WakeCond.wait_for(lock, chrono::milliseconds(waitMs), boost::bind(&CMySQLConnection::HasPendingWork, this));
+			std::unique_lock<std::mutex> lock(m_WakeMtx);
+			m_WakeCond.wait_for(lock, chrono::milliseconds(waitMs), [this] { return HasPendingWork(); });
 		}
 	}
 	mysql_thread_end();

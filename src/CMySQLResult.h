@@ -68,6 +68,7 @@ public:
 
 	CMySQLResult();
 	~CMySQLResult();
+	friend struct TestAccess; //tests/TestAccess.h
 private:
 
 	unsigned int m_Fields;

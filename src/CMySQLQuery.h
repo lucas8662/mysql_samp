@@ -7,7 +7,7 @@
 #include <stack>
 #include <vector>
 #include <memory>
-#include <boost/variant.hpp>
+#include <variant>
 
 using std::string;
 using std::stack;
@@ -63,7 +63,7 @@ public:
 		s_Callback() : Owner(NULL) {}
 		AMX *Owner;
 		std::weak_ptr<void> Lifetime;
-		stack< boost::variant<cell, string> > Params;
+		stack< std::variant<cell, string> > Params;
 		string Name;
 	} Callback;
 

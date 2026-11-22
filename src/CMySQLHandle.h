@@ -3,19 +3,17 @@
 #define INC_CMYSQLHANDLE_H
 
 
-#include <string>
+#include <atomic>
+#include <functional>
 #include <memory>
-#include <boost/unordered_map.hpp>
 #include <set>
-#include <boost/function.hpp>
-#include <boost/atomic.hpp>
+#include <string>
+#include <unordered_map>
 #include "CMySQLConnection.h"
 
 using std::string;
-using boost::unordered_map;
+using std::unordered_map;
 using std::set;
-using boost::function;
-using boost::atomic;
 
 
 class CMySQLQuery;
@@ -34,8 +32,9 @@ public:
 	{
 		return m_MainConnection;
 	}
-	void ExecuteOnConnections(function<void (CMySQLConnection *)> func);
-	bool QueueQuery(CMySQLQuery *query, bool use_pool = false);
+	void ExecuteOnConnections(const std::function<void (CMySQLConnection *)> &func);
+	//takes ownership; on failure the query is discarded
+	bool QueueQuery(std::unique_ptr<CMySQLQuery> query, bool use_pool = false);
 
 
 	//checks if handle exists by id
@@ -96,6 +95,7 @@ public:
 		return ActiveHandle;
 	}
 
+	friend struct TestAccess; //tests/TestAccess.h
 private:
 	std::shared_ptr<void> m_Lifetime = std::make_shared<int>(0);
 	CMySQLHandle(unsigned int id);
@@ -106,7 +106,7 @@ private:
 	static unordered_map<unsigned int, CMySQLHandle *> SQLHandle;
 
 
-	atomic<unsigned int> m_QueryCounter;
+	std::atomic<unsigned int> m_QueryCounter;
 
 	unordered_map<unsigned int, CMySQLResult*> m_SavedResults;
 

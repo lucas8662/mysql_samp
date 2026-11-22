@@ -1,6 +1,7 @@
 #include "main.h"
 #include "CScripting.h"
 #include "CMySQLHandle.h"
+#include "CMySQLQuery.h"
 #include "CCallback.h"
 #include "CLog.h"
 #include "COrm.h"

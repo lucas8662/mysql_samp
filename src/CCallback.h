@@ -5,7 +5,7 @@
 
 #include <stack>
 #include <string>
-#include <boost/variant.hpp>
+#include <variant>
 #include <map>
 #include <memory>
 #include <deque>
@@ -31,8 +31,8 @@ private:
 	// Unbounded: a query that already ran on the server must never lose its
 	// callback because the server thread fell behind.
 	std::mutex m_CallbackQueueMtx;
-	std::deque<CMySQLQuery *> m_CallbackQueue;
-	bool PopQuery(CMySQLQuery *&query);
+	std::deque<std::unique_ptr<CMySQLQuery> > m_CallbackQueue;
+	std::unique_ptr<CMySQLQuery> PopQuery();
 
 	std::map<AMX *, std::shared_ptr<void> > m_AmxList;
 
@@ -51,15 +51,10 @@ public:
 	}
 
 
-	void FillCallbackParams(stack< boost::variant<cell, string> > &dest, const char *format, AMX* amx, cell* params, const int ConstParamCount);
+	void FillCallbackParams(stack< std::variant<cell, string> > &dest, const char *format, AMX* amx, cell* params, const int ConstParamCount);
 
 
-	inline bool QueueQuery(CMySQLQuery *query)
-	{
-		std::lock_guard<std::mutex> lock(m_CallbackQueueMtx);
-		m_CallbackQueue.push_back(query);
-		return true;
-	}
+	void QueueQuery(std::unique_ptr<CMySQLQuery> query);
 
 	inline void AddAmx(AMX *amx)
 	{

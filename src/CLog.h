@@ -2,16 +2,13 @@
 #ifndef INC_CLOG_H
 #define INC_CLOG_H
 
-#include <boost/lockfree/queue.hpp>
-#include <boost/atomic.hpp>
-#include <boost/thread/thread.hpp>
-
+#include <atomic>
+#include <deque>
+#include <mutex>
 #include <string>
+#include <thread>
 
 using std::string;
-using boost::atomic;
-using boost::thread;
-namespace this_thread = boost::this_thread;
 
 enum e_LogLevel
 {
@@ -79,29 +76,26 @@ private:
 	};
 
 	CLog() :
-		m_LogLevel(LOG_ERROR | LOG_WARNING),
-		m_LogThread(NULL),
-		m_LogThreadAlive(true),
+		m_LogFileName("mysql_log.txt"),
 		m_LogType(LOG_TYPE_TEXT),
-		m_LogFileName("mysql_log.txt")
+		m_LogLevel(LOG_ERROR | LOG_WARNING),
+		m_LogThreadAlive(true)
 	{}
 	~CLog();
 
 	void ProcessLog();
+	void QueueLog(m_SLogData &&logData);
 
 	string m_LogFileName;
 	unsigned int m_LogType;
 	unsigned int m_LogLevel;
 
-	thread *m_LogThread;
-	atomic<bool> m_LogThreadAlive;
-	thread::id m_MainThreadID;
+	std::thread m_LogThread; //HTML log writer, started on demand
+	std::atomic<bool> m_LogThreadAlive;
+	std::thread::id m_MainThreadID;
 
-	boost::lockfree::queue<
-		m_SLogData*,
-		boost::lockfree::fixed_sized<true>,
-		boost::lockfree::capacity<32678>
-	> m_LogQueue;
+	std::mutex m_LogQueueMtx;
+	std::deque<m_SLogData> m_LogQueue;
 };
 
 #endif // INC_CLOG_H

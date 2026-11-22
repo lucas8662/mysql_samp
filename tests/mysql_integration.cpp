@@ -3,10 +3,10 @@
 // server does, and a minimal fake AMX drives the natives and receives the
 // callbacks through ProcessTick().
 //
-// Usage: mysql_integration ./bin/mysql.so
+// Usage: mysql_integration ./bin/mysql.so   (or: ctest -L integration)
 // Server comes from MYSQL_TEST_HOST, MYSQL_TEST_PORT, MYSQL_TEST_USER,
-// MYSQL_TEST_PASSWORD and MYSQL_TEST_DATABASE.
-#include <algorithm>
+// MYSQL_TEST_PASSWORD and MYSQL_TEST_DATABASE; without MYSQL_TEST_HOST the
+// test exits with 77, which ctest reports as skipped.
 #include <chrono>
 #include <cmath>
 #include <cstdarg>
@@ -176,6 +176,11 @@ static string Env(const char *name, const char *fallback)
 int main(int argc, char **argv)
 {
     if (argc != 2) { std::fprintf(stderr, "usage: %s <plugin.so>\n", argv[0]); return 2; }
+    if (std::getenv("MYSQL_TEST_HOST") == NULL)
+    {
+        std::puts("MYSQL_TEST_HOST is not set; skipping live database tests");
+        return 77; // ctest SKIP_RETURN_CODE
+    }
     void *plugin = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
     if (!plugin) { std::fprintf(stderr, "%s\n", dlerror()); return 1; }
 
@@ -330,23 +335,18 @@ int main(int argc, char **argv)
     Call("mysql_tquery", { h, Str("SELECT 1"), Str("OnAfterReconnect"), Str("") });
     CHECK(TickUntil([&] { return afterReconnect == 1; }));
 
-    // --- callbacks are never dropped while the server thread is busy -------
-    // More results than the old fixed callback queue (32648) could hold are
-    // produced before a single ProcessTick runs.
+    // --- no query or callback is dropped under load ------------------------
+    // More queries than the old query queue (16876) and more results than the
+    // old callback queue (32648) could hold, all before a single ProcessTick.
     const int burst = 35000;
     int burstCalls = 0;
     Public("OnBurst", [&](const vector<cell> &) { ++burstCalls; });
     const cell burstQuery = Str("DO 0"), burstName = Str("OnBurst"), noFormat = Str("");
-    for (int queued = 0; queued < burst;)
-    {
-        const int chunk = std::min(10000, burst - queued);
-        for (int i = 0; i != chunk; ++i)
-            REQUIRE(Call("mysql_tquery", { h, burstQuery, burstName, noFormat }) == 1);
-        queued += chunk;
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(120);
-        while (Call("mysql_unprocessed_queries", { h }) != 0 && std::chrono::steady_clock::now() < deadline)
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
+    for (int i = 0; i != burst; ++i)
+        REQUIRE(Call("mysql_tquery", { h, burstQuery, burstName, noFormat }) == 1);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(120);
+    while (Call("mysql_unprocessed_queries", { h }) != 0 && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     CHECK(Call("mysql_unprocessed_queries", { h }) == 0);
     processTick();
     CHECK(burstCalls == burst);

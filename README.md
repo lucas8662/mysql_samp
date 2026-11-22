@@ -133,31 +133,51 @@ forma síncrona, `use_cache = true` salva somente o resultado da última query.
 
 ## Compilação local
 
+O projeto usa somente CMake e C++17, sem Boost. O mesmo `CMakeLists.txt`
+compila Linux e Windows.
+
 ### Linux x86
 
-Instale compilador, CMake, bibliotecas Boost de 32 bits, OpenSSL de 32 bits e
-zlib de 32 bits. Em Ubuntu 20.04, por exemplo:
+Instale compilador com suporte a 32 bits, OpenSSL de 32 bits e CMake 3.20 ou
+mais novo. Em Ubuntu 20.04 (o `cmake` do apt é antigo; use o do `pip`):
 
 ```bash
 sudo dpkg --add-architecture i386
 sudo apt update
-sudo apt install cmake g++-multilib make \
-  libboost-thread-dev:i386 libboost-chrono-dev:i386 \
-  libboost-date-time-dev:i386 libboost-system-dev:i386 \
-  libboost-atomic-dev:i386 libssl-dev:i386 zlib1g-dev:i386
-make all
+sudo apt install g++-multilib make libssl-dev:i386 zlib1g-dev:i386 python3-pip
+pip3 install "cmake==3.27.9"
+
+cmake -S . -B build/linux -DCMAKE_BUILD_TYPE=Release
+cmake --build build/linux --parallel
+ctest --test-dir build/linux --output-on-failure
 ```
 
-Os arquivos gerados ficam em `bin/mysql.so` e `bin/mysql_static.so`.
+O toolchain `cmake/linux-x86.cmake` é selecionado automaticamente e gera
+binários de 32 bits. Os arquivos gerados ficam em `bin/mysql.so` (OpenSSL do
+sistema) e `bin/mysql_static.so` (OpenSSL embutido).
 
-Execute `make check-input` para testar o parser SQL e a leitura de números sem
-depender do conector ou de um banco.
+O `ctest` verifica o parser SQL, o carregamento dos dois plugins, a versão do
+conector, os métodos de autenticação MySQL 8 e as regressões do ORM, de
+callbacks e de transações, sem precisar de banco.
 
-Depois da compilação, execute `make check` para verificar o carregamento dos
-dois plugins, a versão 3.4.11, a inicialização do conector e a presença dos
-métodos de autenticação MySQL 8, além das regressões do ORM, de callbacks e de transações com erros simulados. Esses testes não
-conectam a um banco; conexões,
-consultas e TLS devem ser validados também no ambiente de homologação.
+### Teste com banco real
+
+`tests/mysql_integration.cpp` carrega o plugin como o servidor SA:MP/open.mp
+faz e executa as natives contra um MySQL/MariaDB de verdade: conexão, 
+`mysql_format`, `tquery`/`pquery`, cache, `OnQueryError`, prepared statements,
+transações, reconexão e uma rajada de 35000 queries. Sem `MYSQL_TEST_HOST`, o
+teste é marcado como pulado.
+
+```bash
+docker run -d --name mysql-test -p 3306:3306 \
+  -e MYSQL_ROOT_PASSWORD=senha -e MYSQL_DATABASE=samp_test mysql:8.4
+
+MYSQL_TEST_HOST=127.0.0.1 MYSQL_TEST_PORT=3306 MYSQL_TEST_USER=root \
+MYSQL_TEST_PASSWORD=senha MYSQL_TEST_DATABASE=samp_test \
+  ctest --test-dir build/linux -L integration --output-on-failure
+```
+
+O teste cria e apaga a tabela `it_test`; use um banco descartável.
 
 ### Segurança e comportamento do ORM
 
@@ -180,32 +200,26 @@ SA:MP/open.mp real.
 
 ### Windows x86
 
-O projeto usa CMake, Visual Studio e vcpkg. Instale as dependências com o
-triplet `x86-windows-static-md`:
+Use Visual Studio e vcpkg com o triplet `x86-windows-static-md`:
 
 ```powershell
-vcpkg install boost-atomic boost-chrono boost-date-time boost-system boost-thread openssl --triplet x86-windows-static-md
-cmake -S . -B build/windows -A Win32 -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="<vcpkg>/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x86-windows-static-md
-cmake --build build/windows --config Release --parallel
+vcpkg install openssl --triplet x86-windows-static-md
+cmake -S . -B build/windows -A Win32 -DCMAKE_TOOLCHAIN_FILE="<vcpkg>/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x86-windows-static-md
+cmake --build build/windows --config Release --target mysql_plugin --parallel
 ```
 
-O resultado é `build/windows/Release/mysql.dll`.
+O resultado é `build/windows/Release/mysql.dll`. O Visual Studio também abre a
+pasta do projeto diretamente pelo `CMakeLists.txt`.
 
 ## GitHub Actions
 
-O workflow em `.github/workflows/build.yml` roda em push para `master`, pull
-request, tag iniciada por `v` ou execução manual. Ele publica artefatos
-separados para:
+O workflow em `.github/workflows/build.yml` roda em push para `main`, pull
+request, tag iniciada por `v` ou execução manual. Ele:
 
-- Linux x86: `mysql.so` e `mysql_static.so`, compilados em Ubuntu 20.04.
-- Windows x86: `mysql.dll`.
-
-## Validação feita
-
-O binário Linux foi compilado e verificado em Ubuntu 20.04 x86. Ele não depende
-de `libmysqlclient`, contém o plugin `caching_sha2_password` e não apresentou
-bibliotecas ou símbolos ausentes. A validação contra o banco real depende das
-credenciais e das permissões do ambiente em que o servidor for executado.
+- compila `mysql.so` e `mysql_static.so` em Ubuntu 20.04 e roda o `ctest`;
+- roda o teste com banco real contra MySQL 8.4, MySQL 5.7 e MariaDB 11.4;
+- compila `mysql.dll` para Windows x86;
+- publica os binários como artefatos.
 
 
 ## Prepared statements

@@ -6,18 +6,9 @@
 #include <stack>
 #include <set>
 #include <vector>
-#include <boost/thread.hpp>
-#include <boost/lockfree/queue.hpp>
-#include <boost/lockfree/spsc_queue.hpp>
-#include <boost/unordered_map.hpp>
-#include <boost/variant.hpp>
-#include <boost/function.hpp>
 #include "CLog.h"
 #include "main.h"
-#define private public
-#include "CMySQLHandle.h"
-#include "CMySQLConnection.h"
-#undef private
+#include "TestAccess.h"
 #include "CMySQLResult.h"
 #include "CMySQLQuery.h"
 #include "CCallback.h"
@@ -83,13 +74,13 @@ extern "C" MYSQL * STDCALL mysql_real_connect(MYSQL *connection, const char *,
     return connection;
 }
 
-static CMySQLQuery *Callback(CMySQLHandle *handle, AMX *owner)
+static std::unique_ptr<CMySQLQuery> Callback(CMySQLHandle *handle, AMX *owner)
 {
-    auto *query = new CMySQLQuery;
+    std::unique_ptr<CMySQLQuery> query(new CMySQLQuery);
     query->Handle = handle;
     query->Result = new CMySQLResult;
     query->Callback.Name = "SameCallback";
-    CCallback::Get()->BindOwner(query, owner);
+    CCallback::Get()->BindOwner(query.get(), owner);
     return query;
 }
 int main()
@@ -103,20 +94,20 @@ int main()
     AMX first{}, second{};
     callbacks->AddAmx(&first);
     callbacks->AddAmx(&second);
-    auto *handle = new CMySQLHandle(77);
-    CMySQLHandle::SQLHandle[77] = handle;
+    auto *handle = TestAccess::NewHandle(77);
+    TestAccess::RegisterHandle(handle);
     expectedOwner = &second;
-    assert(callbacks->QueueQuery(Callback(handle, &second)));
+    callbacks->QueueQuery(Callback(handle, &second));
     callbacks->ProcessCallbacks();
     assert(executions == 1);
-    assert(callbacks->QueueQuery(Callback(handle, &first)));
+    callbacks->QueueQuery(Callback(handle, &first));
     callbacks->EraseAmx(&first);
     callbacks->AddAmx(&first); // Same address, different script generation.
     callbacks->ProcessCallbacks();
     assert(executions == 1);
     closingHandle = handle;
     const auto lifetime = handle->GetLifetime();
-    assert(callbacks->QueueQuery(Callback(handle, &second)));
+    callbacks->QueueQuery(Callback(handle, &second));
     callbacks->ProcessCallbacks();
     assert(executions == 2 && lifetime.expired());
 
@@ -124,7 +115,7 @@ int main()
     auto *a = CMySQLConnection::Create(host, user, password, database, 3306, false, false);
     auto *b = CMySQLConnection::Create(host, user, password, database, 3307, false, false);
     assert(!(*a == *b));
-    b->m_Port = 3306;
+    TestAccess::Port(b) = 3306;
     assert(*a == *b);
     a->Destroy(); b->Destroy();
 
@@ -155,7 +146,7 @@ int main()
     assert(!CMySQLHandle::Create(host, user, password, database, 0, 0, false));
     assert(!CMySQLHandle::Create(host, user, password, database, 3306, 65, false));
 
-    handle = new CMySQLHandle(78);
+    handle = TestAccess::NewHandle(78);
     for (int scenario = 0; scenario != 3; ++scenario)
     {
         commands.clear();
@@ -168,14 +159,14 @@ int main()
         query.Callback.Name.assign(4096, 'x');
         query.TransactionQueries.push_back("CALL failing_procedure()");
         query.TransactionQueries.push_back("UPDATE should_not_run SET x=1");
-        handle->m_QueryCounter = 1;
+        TestAccess::QueryCounter(handle) = 1;
         const bool success = query.Execute(reinterpret_cast<MYSQL *>(1));
         if (scenario < 2)
         {
             assert(!success && commands.size() == 3);
             assert(commands[0] == "START TRANSACTION" && commands[2] == "ROLLBACK");
             assert(query.Callback.Name == "OnQueryError");
-            assert(boost::get<cell>(query.Callback.Params.top()) == 78);
+            assert(std::get<cell>(query.Callback.Params.top()) == 78);
         }
         else
         {
@@ -188,7 +179,7 @@ int main()
         CMySQLQuery query;
         query.Handle = handle;
         query.Callback.Name.assign(4096, 'x');
-        handle->m_QueryCounter = 1;
+        TestAccess::QueryCounter(handle) = 1;
         assert(query.Execute(reinterpret_cast<MYSQL *>(1)));
     }
     {
@@ -196,7 +187,7 @@ int main()
         query.Handle = handle;
         query.IsPreparedStatement = true;
         query.Callback.Name.assign(4096, 'x');
-        handle->m_QueryCounter = 1;
+        TestAccess::QueryCounter(handle) = 1;
         assert(!query.Execute(reinterpret_cast<MYSQL *>(1)));
         assert(query.Callback.Name == "OnQueryError");
     }

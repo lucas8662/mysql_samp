@@ -3,21 +3,18 @@
 #define INC_CMYSQLCONNECTION_H
 
 
-#include <string>
-#include <boost/atomic.hpp>
-#include <boost/thread/thread.hpp>
-#include <boost/lockfree/spsc_queue.hpp>
-#include <boost/function.hpp>
-#include <boost/thread/mutex.hpp>
-#include <boost/thread/condition_variable.hpp>
-#include <boost/chrono.hpp>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <functional>
+#include <memory>
+#include <mutex>
 #include <queue>
+#include <string>
+#include <thread>
 
 using std::string;
-using boost::atomic;
-using boost::thread;
-using boost::function;
-using std::queue;
 
 #ifdef WIN32
 	#include <WinSock2.h>
@@ -70,13 +67,8 @@ public:
 		return m_Connection;
 	}
 
-	inline bool QueueQuery(CMySQLQuery *query)
-	{
-		if (!m_QueryQueue.push(query))
-			return false;
-		WakeUp();
-		return true;
-	}
+	// Unbounded: the server thread never has to drop a script's query.
+	void QueueQuery(std::unique_ptr<CMySQLQuery> query);
 
 	inline bool operator==(CMySQLConnection &rhs)
 	{
@@ -85,11 +77,23 @@ public:
 			&& rhs.m_TLS.CAFile == m_TLS.CAFile && rhs.m_TLS.CAPath == m_TLS.CAPath && rhs.m_TLS.Cipher == m_TLS.Cipher);
 	}
 
+	friend struct TestAccess; //tests/TestAccess.h
 private: //functions
 	void ProcessQueries();
-	void QueueFunction(const function<bool()> &func);
+	void QueueFunction(std::function<bool()> func);
+	std::unique_ptr<CMySQLQuery> PopQuery();
+	//true when called from another thread than this connection's query thread
+	bool MustQueue() const
+	{
+		return m_QueryThread.joinable() && std::this_thread::get_id() != m_QueryThread.get_id();
+	}
 	void WakeUp();
 	bool HasPendingFunctions();
+	bool HasQueuedQueries()
+	{
+		std::lock_guard<std::mutex> lockguard(m_QueryQueueMtx);
+		return !m_QueryQueue.empty();
+	}
 	bool HasPendingWork();
 	void ScheduleReconnect(bool failed);
 
@@ -98,26 +102,23 @@ private: //variables
 	~CMySQLConnection();
 
 
-	thread *m_QueryThread;
-	atomic<bool> m_QueryThreadRunning;
+	std::thread m_QueryThread; //not joinable for unthreaded connections
+	std::atomic<bool> m_QueryThreadRunning;
 
-	boost::lockfree::spsc_queue<
-		CMySQLQuery *,
-		boost::lockfree::fixed_sized<true>,
-		boost::lockfree::capacity<16876>
-	> m_QueryQueue;
+	std::mutex m_QueryQueueMtx;
+	std::deque<std::unique_ptr<CMySQLQuery> > m_QueryQueue;
 
-	boost::mutex m_FuncQueueMtx;
-	queue<function<bool()> > m_FuncQueue;
+	std::mutex m_FuncQueueMtx;
+	std::queue<std::function<bool()> > m_FuncQueue;
 
 	//wakes the query thread as soon as work arrives instead of polling
-	boost::mutex m_WakeMtx;
-	boost::condition_variable m_WakeCond;
+	std::mutex m_WakeMtx;
+	std::condition_variable m_WakeCond;
 
 	//background reconnect state; only touched by the query thread
 	bool m_ConnectRequested;
 	unsigned int m_ReconnectDelayMs;
-	boost::chrono::steady_clock::time_point m_NextReconnect;
+	std::chrono::steady_clock::time_point m_NextReconnect;
 
 
 	//MySQL server login values

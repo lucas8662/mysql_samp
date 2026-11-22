@@ -1,3 +1,4 @@
+/build/
 /bin/
 third_party/mariadb-connector-c/build-linux-x86/
 *.o

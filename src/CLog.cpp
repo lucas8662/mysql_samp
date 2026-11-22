@@ -1,13 +1,10 @@
 #include <cstdio>
 #include <cstdarg>
 #include <ctime>
+#include <chrono>
 #include <vector>
 
-#include <boost/chrono.hpp>
-
 #include "CLog.h"
-
-namespace chrono = boost::chrono;
 
 CLog *CLog::m_Instance = NULL;
 
@@ -79,11 +76,19 @@ void CLog::ProcessLog()
 		startTime);
 	fflush(logFile);
 
-	while (m_LogThreadAlive)
+	for (bool alive = true; alive;)
 	{
-		m_SLogData *logData = NULL;
-		while (m_LogQueue.pop(logData))
+		// Read the flag before draining, so entries queued before shutdown
+		// are still written on the last pass.
+		alive = m_LogThreadAlive;
+		std::deque<m_SLogData> pending;
 		{
+			std::lock_guard<std::mutex> lock(m_LogQueueMtx);
+			pending.swap(m_LogQueue);
+		}
+		for (const m_SLogData &entry : pending)
+		{
+			const m_SLogData *logData = &entry;
 			if (logData->Info == LOG_INFO_CALLBACK_BEGIN)
 			{
 				const string callback = EscapeJavaScriptString(logData->Msg);
@@ -100,10 +105,10 @@ void CLog::ProcessLog()
 				fprintf(logFile, "<script>Log(\"%s\",\"%s\",\"%s\",\"%s\");</script>\n",
 					timeform, functionName.c_str(), LogLevelName(logData->Status), message.c_str());
 			}
-			delete logData;
 		}
 		fflush(logFile);
-		this_thread::sleep_for(chrono::milliseconds(10));
+		if (alive)
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	}
 
 	fputs("</body></html>\n", logFile);
@@ -114,7 +119,13 @@ void CLog::Initialize(const char *logfile)
 {
 	m_LogFileName = logfile != NULL && *logfile != '\0' ? logfile : "mysql_log.txt";
 	SetLogType(m_LogType);
-	m_MainThreadID = this_thread::get_id();
+	m_MainThreadID = std::this_thread::get_id();
+}
+
+void CLog::QueueLog(m_SLogData &&logData)
+{
+	std::lock_guard<std::mutex> lock(m_LogQueueMtx);
+	m_LogQueue.push_back(std::move(logData));
 }
 
 void CLog::SetLogType(unsigned int logtype)
@@ -129,8 +140,8 @@ void CLog::SetLogType(unsigned int logtype)
 	const string baseName = extension == string::npos ? m_LogFileName : m_LogFileName.substr(0, extension);
 	m_LogFileName = baseName + (logtype == LOG_TYPE_HTML ? ".html" : ".txt");
 
-	if (logtype == LOG_TYPE_HTML && m_LogThread == NULL)
-		m_LogThread = new thread(&CLog::ProcessLog, this);
+	if (logtype == LOG_TYPE_HTML && !m_LogThread.joinable())
+		m_LogThread = std::thread(&CLog::ProcessLog, this);
 }
 
 int CLog::LogFunction(unsigned int loglevel, const char *funcname, const char *msg, ...)
@@ -146,13 +157,12 @@ int CLog::LogFunction(unsigned int loglevel, const char *funcname, const char *m
 
 	if (m_LogType == LOG_TYPE_HTML)
 	{
-		m_SLogData *logData = new m_SLogData;
-		logData->Info = this_thread::get_id() != m_MainThreadID ? LOG_INFO_THREADED : LOG_INFO_NONE;
-		logData->Status = loglevel;
-		logData->Name = functionName;
-		logData->Msg = formatted;
-		if (!m_LogQueue.push(logData))
-			delete logData;
+		m_SLogData logData;
+		logData.Info = std::this_thread::get_id() != m_MainThreadID ? LOG_INFO_THREADED : LOG_INFO_NONE;
+		logData.Status = loglevel;
+		logData.Name = functionName;
+		logData.Msg = formatted;
+		QueueLog(std::move(logData));
 	}
 	else
 	{
@@ -184,34 +194,26 @@ void CLog::StartCallback(const char *cbname)
 {
 	if (m_LogLevel == LOG_NONE || m_LogType != LOG_TYPE_HTML)
 		return;
-	m_SLogData *logData = new m_SLogData;
-	logData->Info = LOG_INFO_CALLBACK_BEGIN;
-	logData->Msg = cbname != NULL ? cbname : "";
-	if (!m_LogQueue.push(logData))
-		delete logData;
+	m_SLogData logData;
+	logData.Info = LOG_INFO_CALLBACK_BEGIN;
+	logData.Msg = cbname != NULL ? cbname : "";
+	QueueLog(std::move(logData));
 }
 
 void CLog::EndCallback()
 {
 	if (m_LogLevel == LOG_NONE || m_LogType != LOG_TYPE_HTML)
 		return;
-	m_SLogData *logData = new m_SLogData;
-	logData->Info = LOG_INFO_CALLBACK_END;
-	if (!m_LogQueue.push(logData))
-		delete logData;
+	m_SLogData logData;
+	logData.Info = LOG_INFO_CALLBACK_END;
+	QueueLog(std::move(logData));
 }
 
 CLog::~CLog()
 {
-	if (m_LogThread != NULL)
+	if (m_LogThread.joinable())
 	{
 		m_LogThreadAlive = false;
-		m_LogThread->join();
-		delete m_LogThread;
-		m_LogThread = NULL;
+		m_LogThread.join();
 	}
-
-	m_SLogData *logData = NULL;
-	while (m_LogQueue.pop(logData))
-		delete logData;
 }

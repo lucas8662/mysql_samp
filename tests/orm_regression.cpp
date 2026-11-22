@@ -9,21 +9,11 @@
 #include <stack>
 #include <set>
 #include <vector>
-#include <boost/thread.hpp>
-#include <boost/lockfree/queue.hpp>
-#include <boost/lockfree/spsc_queue.hpp>
-#include <boost/unordered_map.hpp>
-#include <boost/variant.hpp>
-#include <boost/function.hpp>
 #include "CLog.h"
 #include "main.h"
 
 // Test-only fixtures: no live database and no worker threads are created.
-#define private public
-#include "CMySQLConnection.h"
-#include "CMySQLHandle.h"
-#include "CMySQLResult.h"
-#undef private
+#include "TestAccess.h"
 #include "CMySQLQuery.h"
 #include "COrm.h"
 #include "CCallback.h"
@@ -65,13 +55,13 @@ int main()
     pAMXFunctions = exports;
     CLog::Get()->SetLogLevel(LOG_NONE);
     assert(mysql_library_init(0, NULL, NULL) == 0);
-    CMySQLHandle *handle = new CMySQLHandle(0);
+    CMySQLHandle *handle = TestAccess::NewHandle(0);
     string host, user, password, database;
-    handle->m_MainConnection = CMySQLConnection::Create(host, user, password, database, 3306, false, false);
-    auto *connection = handle->m_MainConnection;
-    connection->m_Connection = mysql_init(NULL);
-    assert(connection->m_Connection);
-    connection->m_IsConnected = true; // EscapeString works with an initialized client charset.
+    TestAccess::MainConnection(handle) = CMySQLConnection::Create(host, user, password, database, 3306, false, false);
+    auto *connection = TestAccess::MainConnection(handle);
+    TestAccess::Mysql(connection) = mysql_init(NULL);
+    assert(TestAccess::Mysql(connection));
+    TestAccess::Connected(connection) = true; // EscapeString works with an initialized client charset.
 
     cell key = 9, floating = FloatCell(1.25f);
     vector<cell> text(7001, 'x');
@@ -94,10 +84,10 @@ int main()
     assert(!orm->GenerateUpdateQuery(query));
     floating = FloatCell(1.25f);
     CMySQLResult result;
-    result.m_InsertID = 42;
+    TestAccess::InsertId(result) = 42;
     orm->ApplyInsertResult(&result);
     assert(key == 42 && orm->GetErrorID() == ORM_ERROR_OK);
-    result.m_InsertID = static_cast<my_ulonglong>((std::numeric_limits<cell>::max)()) + 1;
+    TestAccess::InsertId(result) = static_cast<my_ulonglong>((std::numeric_limits<cell>::max)()) + 1;
     orm->ApplyInsertResult(&result);
     assert(key == 42 && orm->GetErrorID() == ORM_ERROR_NO_DATA);
 
@@ -107,7 +97,7 @@ int main()
     assert(pending->Orm.Cancelled());
     unsigned replacement = COrm::Create("new_table", handle);
     assert(replacement == id && pending->Orm.Cancelled());
-    assert(CCallback::Get()->QueueQuery(pending));
+    CCallback::Get()->QueueQuery(std::unique_ptr<CMySQLQuery>(pending));
     CCallback::Get()->ProcessCallbacks(); // Executes the production cancellation guard.
     COrm::GetOrm(replacement)->Destroy();
 
@@ -121,10 +111,10 @@ int main()
     assert(orm->GenerateDeleteQuery(query) && query.size() > 2000);
     assert(query.find("\\'") != string::npos);
     assert(orm->GenerateInsertQuery(query) && query.find("(`name`)") != string::npos);
-    result.m_InsertID = 123;
+    TestAccess::InsertId(result) = 123;
     orm->ApplyInsertResult(&result);
     assert(stringKey[0] == 'k' && stringKey[1999] == '\'');
-    result.m_InsertID = 0;
+    TestAccess::InsertId(result) = 0;
     orm->ApplyInsertResult(&result);
     assert(orm->GetErrorID() == ORM_ERROR_OK);
     assert(!orm->GenerateUpdateQuery(query));
@@ -134,9 +124,9 @@ int main()
     assert(orm->AddVariable("score", &key, DATATYPE_INT));
     assert(pending->Orm.Cancelled()); // Changed field bindings cannot consume old results.
     delete pending;
-    connection->m_IsConnected = false;
+    TestAccess::Connected(connection) = false;
     assert(!orm->GenerateDeleteQuery(query));
-    connection->m_IsConnected = true;
+    TestAccess::Connected(connection) = true;
     pending = new CMySQLQuery;
     Bind(pending, orm);
     COrm::ClearByHandle(handle);

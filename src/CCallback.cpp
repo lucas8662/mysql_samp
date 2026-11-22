@@ -11,23 +11,24 @@
 
 CCallback *CCallback::m_Instance = new CCallback;
 
-CCallback::~CCallback()
+CCallback::~CCallback() = default;
+
+void CCallback::QueueQuery(std::unique_ptr<CMySQLQuery> query)
 {
-	CMySQLQuery *query = NULL;
-	while (PopQuery(query))
-		delete query;
+	std::lock_guard<std::mutex> lock(m_CallbackQueueMtx);
+	m_CallbackQueue.push_back(std::move(query));
 }
 
 // Pops one entry at a time and never holds the lock while a callback runs:
 // a callback may call mysql_close(), which re-enters ClearByHandle().
-bool CCallback::PopQuery(CMySQLQuery *&query)
+std::unique_ptr<CMySQLQuery> CCallback::PopQuery()
 {
 	std::lock_guard<std::mutex> lock(m_CallbackQueueMtx);
 	if (m_CallbackQueue.empty())
-		return false;
-	query = m_CallbackQueue.front();
+		return nullptr;
+	std::unique_ptr<CMySQLQuery> query = std::move(m_CallbackQueue.front());
 	m_CallbackQueue.pop_front();
-	return true;
+	return query;
 }
 
 void CCallback::BindOwner(CMySQLQuery *query, AMX *amx)
@@ -40,15 +41,11 @@ void CCallback::BindOwner(CMySQLQuery *query, AMX *amx)
 
 void CCallback::ProcessCallbacks() 
 {
-	CMySQLQuery *query = NULL;
-	while(PopQuery(query))
+	while (std::unique_ptr<CMySQLQuery> query = PopQuery())
 	{
 		// ORM destruction/script unload cancels application, not SQL already sent.
 		if (query->Orm.Cancelled() || (query->Callback.Owner != NULL && query->Callback.Lifetime.expired()))
-		{
-			delete query;
 			continue;
-		}
 		if (query->Orm.Object != NULL)
 		{
 			switch (query->Orm.Type)
@@ -78,23 +75,23 @@ void CCallback::ProcessCallbacks()
 
 					while (!query->Callback.Params.empty())
 					{
-						boost::variant<cell, string> value = boost::move(query->Callback.Params.top());
-						if (value.type() == typeid(cell))
+						std::variant<cell, string> value = std::move(query->Callback.Params.top());
+						if (cell *number = std::get_if<cell>(&value))
 						{
 							if (pass_by_ref)
 							{
 								cell tmp_addr;
-								amx_PushArray(amx, &tmp_addr, NULL, (cell*)&boost::get<cell>(value), 1);
+								amx_PushArray(amx, &tmp_addr, NULL, number, 1);
 								if (amx_mem_addr < 0)
 									amx_mem_addr = tmp_addr;
 							}
 							else
-								amx_Push(amx, boost::get<cell>(value));
+								amx_Push(amx, *number);
 						}
 						else
 						{
 							cell tmp_addr;
-							amx_PushString(amx, &tmp_addr, NULL, boost::get<string>(value).c_str(), 0, 0);
+							amx_PushString(amx, &tmp_addr, NULL, std::get<string>(value).c_str(), 0, 0);
 							if (amx_mem_addr < 0)
 								amx_mem_addr = tmp_addr;
 						}
@@ -123,13 +120,11 @@ void CCallback::ProcessCallbacks()
 			}
 		}
 
-		delete query;
-		query = NULL;
 	}
 }
 
 
-void CCallback::FillCallbackParams(stack< boost::variant<cell, string> > &dest, const char *format, AMX* amx, cell* params, const int ConstParamCount)
+void CCallback::FillCallbackParams(stack< std::variant<cell, string> > &dest, const char *format, AMX* amx, cell* params, const int ConstParamCount)
 {
 	if (format == NULL || !(*format))
 		return ;
@@ -162,20 +157,17 @@ void CCallback::FillCallbackParams(stack< boost::variant<cell, string> > &dest, 
 
 void CCallback::ClearByHandle(CMySQLHandle *handle)
 {
-	std::deque<CMySQLQuery *> removed;
+	// Destroyed after the lock is released: a query's destructor may log.
+	std::deque<std::unique_ptr<CMySQLQuery> > removed;
+	std::lock_guard<std::mutex> lock(m_CallbackQueueMtx);
+	for (auto it = m_CallbackQueue.begin(); it != m_CallbackQueue.end();)
 	{
-		std::lock_guard<std::mutex> lock(m_CallbackQueueMtx);
-		for (std::deque<CMySQLQuery *>::iterator it = m_CallbackQueue.begin(); it != m_CallbackQueue.end();)
+		if ((*it)->Handle == handle)
 		{
-			if ((*it)->Handle == handle)
-			{
-				removed.push_back(*it);
-				it = m_CallbackQueue.erase(it);
-			}
-			else
-				++it;
+			removed.push_back(std::move(*it));
+			it = m_CallbackQueue.erase(it);
 		}
+		else
+			++it;
 	}
-	for (size_t i = 0; i != removed.size(); ++i)
-		delete removed[i];
 }

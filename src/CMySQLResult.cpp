@@ -1,8 +1,9 @@
-#pragma once
+#include <cstring>
 
 #include "CLog.h"
 #include "CMySQLResult.h"
 #include "CMySQLHandle.h"
+#include <cstdlib>
 
 
 const char *CMySQLResult::GetFieldName(unsigned int idx)
