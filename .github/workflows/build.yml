@@ -137,7 +137,7 @@ jobs:
               DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
                 g++-multilib make libssl-dev:i386 zlib1g-dev:i386 python3-pip
               pip3 install -q "cmake==3.27.9"
-              tests/run-sanitizers.sh address
+              bash tests/run-sanitizers.sh address
             '
       - name: ThreadSanitizer (64-bit test build, Clang)
         if: matrix.sanitizer == 'thread'
@@ -147,7 +147,7 @@ jobs:
           # Clang 14's TSan cannot map its shadow memory with the runner
           # kernel's default ASLR entropy.
           sudo sysctl vm.mmap_rnd_bits=28
-          tests/run-sanitizers.sh thread
+          bash tests/run-sanitizers.sh thread
 
   windows-x86:
     name: Windows x86
